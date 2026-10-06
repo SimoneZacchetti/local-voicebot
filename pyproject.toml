@@ -1,0 +1,32 @@
+[project]
+name = "voicebot"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.142.2",
+    "httpx>=0.28.1",
+    "lingua-language-detector>=2.2.0",
+    "numpy>=2.5.3",
+    "openai>=3.24.0",
+    "parakeet-mlx>=0.5.3",
+    "pocket-tts>=3.3.0",
+    "python-dotenv>=1.2.4",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.optional-dependencies]
+whisper = [
+    "mlx-whisper>=0.4.3",
+]
+
+[dependency-groups]
+dev = [
+    "playwright>=1.63.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+testpaths = ["tests"]
