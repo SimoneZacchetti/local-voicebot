@@ -178,6 +178,52 @@ async def check_groq() -> None:
             report(OK if model in ids else FAIL, f"Groq model {model}", "available" if model in ids else "not available")
 
 
+def tailscale_cli() -> str | None:
+    import shutil
+
+    return shutil.which("tailscale") or next(
+        (p for p in ("/Applications/Tailscale.app/Contents/MacOS/Tailscale",) if Path(p).exists()), None)
+
+
+def check_remote() -> None:
+    """Phone access: config sanity, secrets hygiene and what `tailscale serve` publishes."""
+    import json
+    import subprocess
+
+    from server.__main__ import config_problems
+
+    for p in config_problems():
+        report(FAIL, "server config", p)
+    if not cfg.remote_enabled:
+        return report(OK, "remote access", "disabled (REMOTE_ENABLED=false)")
+    root = Path(__file__).resolve().parent.parent
+    env = root / ".env"
+    tracked = subprocess.run(["git", "ls-files", "--error-unmatch", ".env"], cwd=root, capture_output=True).returncode == 0
+    report(FAIL if tracked else OK, ".env in git", "TRACKED: remove it from git now" if tracked else "not tracked")
+    if env.exists():
+        mode = env.stat().st_mode & 0o777
+        report(OK if mode & 0o077 == 0 else WARN, ".env permissions", f"{mode:o}" + ("" if mode & 0o077 == 0 else ": run chmod 600 .env"))
+    report(OK if cfg.api_tokens else WARN, "API_TOKENS", f"{len(cfg.api_tokens)} device token(s)" if cfg.api_tokens else "none: Siri Shortcuts disabled")
+    cli = tailscale_cli()
+    if not cli:
+        return report(WARN, "tailscale CLI", "not found: install Tailscale and enable the CLI")
+    out = subprocess.run([cli, "serve", "status", "--json"], capture_output=True, text=True, timeout=10)
+    try:
+        st = json.loads(out.stdout or "{}")
+    except ValueError:
+        return report(WARN, "tailscale serve", (out.stderr or out.stdout).strip()[:200])
+    proxies = [h.get("Proxy", "") for web in (st.get("Web") or {}).values() for h in (web.get("Handlers") or {}).values()]
+    want = f"http://127.0.0.1:{cfg.remote_port}"
+    if not proxies:
+        report(WARN, "tailscale serve", f"nothing published: run `tailscale serve --bg {cfg.remote_port}`")
+    elif all(p.rstrip("/") == want for p in proxies):
+        report(OK, "tailscale serve", f"only {want}")
+    else:
+        report(FAIL, "tailscale serve", f"publishes {proxies}: only {want} is allowed (never PORT {cfg.port})")
+    funnel = [k for k, v in (st.get("AllowFunnel") or {}).items() if v]
+    report(FAIL if funnel else OK, "tailscale funnel", f"ON for {funnel}: run `tailscale funnel reset`" if funnel else "off")
+
+
 def main() -> int:
     report(OK if sys.version_info[:2] == (3, 12) else WARN, "Python", sys.version.split()[0])
     asyncio.run(check_ollama())
@@ -189,6 +235,7 @@ def main() -> int:
     report(OK, "language detection (lingua)", f"{len(cfg.langid_langs)} languages")
     asyncio.run(check_groq())
     asyncio.run(check_home())
+    check_remote()
     print("\nAll good." if not failures else f"\n{failures} problem(s) found.")
     return 1 if failures else 0
 

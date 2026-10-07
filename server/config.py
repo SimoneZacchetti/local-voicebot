@@ -143,6 +143,18 @@ class Config:
     host: str = field(default_factory=lambda: _env("HOST", "127.0.0.1"))
     port: int = field(default_factory=lambda: _env_int("PORT", 8000))
     warmup: bool = field(default_factory=lambda: _env_bool("WARMUP", True))
+    # Browser pages allowed to open /ws on the local port (blocks cross-site WebSocket hijacking)
+    local_hosts: list[str] = field(default_factory=lambda: _env_list("LOCAL_HOSTS", "127.0.0.1,localhost"))
+    local_origins: list[str] = field(default_factory=lambda: _env_list(
+        "LOCAL_ORIGINS", ",".join(f"http://{h}:{_env('PORT', '8000')}" for h in ("127.0.0.1", "localhost"))))
+
+    # Remote access from the phone: a second loopback port published on the tailnet by
+    # `tailscale serve` (never funnel). Every request on it must carry an allowed Tailscale login.
+    remote_enabled: bool = field(default_factory=lambda: _env_bool("REMOTE_ENABLED", False))
+    remote_port: int = field(default_factory=lambda: _env_int("REMOTE_PORT", 8001))
+    public_host: str = field(default_factory=lambda: _env("PUBLIC_HOST", "").lower())  # e.g. voicebot-mac.tailXXXX.ts.net
+    ts_allowed_logins: list[str] = field(default_factory=lambda: [x.lower() for x in _env_list("TS_ALLOWED_LOGINS", "")])
+    api_tokens: list[str] = field(default_factory=lambda: _env_list("API_TOKENS", ""))  # one per device (Shortcuts)
 
 
 cfg = Config()

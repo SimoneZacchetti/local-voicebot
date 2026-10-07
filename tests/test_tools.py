@@ -255,6 +255,7 @@ def home(monkeypatch):
     llm = ToolLlm()
     svc = Services(stt=FakeStt(), llm=llm, tts=FakeTts(), langid=LangId(), tools=ToolRegistry(fake_home))
     monkeypatch.setattr(cfg, "warmup", False)
+    monkeypatch.setattr(cfg, "local_hosts", [*cfg.local_hosts, "testserver"])  # TestClient Host
     monkeypatch.setattr(main, "build_services", lambda: svc)
     orig = Session.__init__
 

@@ -36,8 +36,17 @@ log = logging.getLogger("voicebot.session")
 
 UTT_HEADER = struct.Struct("<IiiI")
 MAX_TEXT_CHARS = 2000  # typed chat message
+MAX_UTT_BYTES = UTT_HEADER.size + 30 * SAMPLE_RATE * 2  # 30 s of 16 kHz PCM16
 AUDIO_HEADER = struct.Struct("<II")
 FLAG_PLAYING = 1
+
+
+def _int(v, default: int) -> int:
+    """Integer field sent by the client; garbage becomes ``default`` instead of an exception."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
 
 
 @dataclass
@@ -141,9 +150,19 @@ class Session:
                 if msg["type"] == "websocket.disconnect":
                     break
                 if (data := msg.get("bytes")) is not None:
+                    if len(data) > MAX_UTT_BYTES:
+                        self.send({"type": "error", "stage": "protocol", "msg": "utterance too long"})
+                        continue
                     self._spawn(self.handle_utterance(data))
                 elif (text := msg.get("text")) is not None:
-                    self.handle_control(json.loads(text))
+                    try:
+                        m = json.loads(text)
+                    except ValueError:
+                        m = None
+                    if not isinstance(m, dict):
+                        self.send({"type": "error", "stage": "protocol", "msg": "invalid message"})
+                        continue
+                    self.handle_control(m)
         except WebSocketDisconnect:
             pass
         finally:
@@ -175,7 +194,7 @@ class Session:
             if cur is not None and m.get("heard_turn") == cur.id:
                 self._supersede(cur)
                 cur.done = True
-                self._truncate_to_heard(cur, int(m.get("heard_seq", -1)))
+                self._truncate_to_heard(cur, _int(m.get("heard_seq"), -1))
         elif kind == "confirm_answer" and self.pending is not None and self.pending.asked:
             # Sì/No buttons: same path as answering by voice.
             self._spawn(self._answer_pending("sì" if m.get("yes") else "no"))
@@ -277,7 +296,7 @@ class Session:
             lang = self.svc.langid.requested(text) or self.svc.langid.resolve(text, self.lang)
             self.lang = lang
             # Typed text is never a continuation of the previous message: no merge.
-            self._interrupt_current(int(m.get("heard_turn", -1)), int(m.get("heard_seq", -1)),
+            self._interrupt_current(_int(m.get("heard_turn"), -1), _int(m.get("heard_seq"), -1),
                                     bool(m.get("playing")), t0, merge=False)
             turn = self._new_turn(0, text, lang, t0)
             self.send({"type": "transcript", "turn": turn.id, "utt_id": 0, "text": text,

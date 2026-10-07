@@ -11,6 +11,7 @@ __pycache__/
 *.pem
 *.key
 secrets*
+data/
 
 # OS / editor
 .DS_Store

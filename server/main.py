@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 
+from .auth import RemoteGate
 from .config import cfg
 from .langid import LangId
 from .llm import LlmRouter
@@ -90,6 +91,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(RemoteGate)  # local/remote access rules: server/auth.py
 
 
 @app.websocket("/ws")
@@ -103,5 +105,5 @@ async def healthz() -> dict:
     return {"ok": True}
 
 
-# Mounted last so it does not shadow /ws and /healthz.
+# Mounted last so it does not shadow /ws, /healthz and any /api route declared above.
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

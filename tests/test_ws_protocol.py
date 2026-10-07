@@ -82,6 +82,7 @@ def client(monkeypatch):
     llm = FakeLlm()
     svc = Services(stt=FakeStt(), llm=llm, tts=FakeTts(), langid=LangId())
     monkeypatch.setattr(cfg, "warmup", False)
+    monkeypatch.setattr(cfg, "local_hosts", [*cfg.local_hosts, "testserver"])  # TestClient Host
     monkeypatch.setattr(main, "build_services", lambda: svc)
     orig_init = Session.__init__
 
