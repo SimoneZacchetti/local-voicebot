@@ -16,3 +16,6 @@ secrets*
 .DS_Store
 .idea/
 .vscode/
+
+# Personal notes
+TODO.md

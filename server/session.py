@@ -25,7 +25,7 @@ from .chunker import Chunker
 from .config import cfg
 from .langid import BCP47, LangId
 from .llm import LlmRouter
-from .prompts import CANCELLED, DONE, FAILED, GREETINGS, PARTIAL, build_messages
+from .prompts import CANCELLED, DONE, FAILED, GREETINGS, PARTIAL, build_messages, set_home_context
 from .stt import SAMPLE_RATE, SttRouter
 from .textclean import clean_for_tts, is_echo, is_hallucination
 from .tools import PendingAction, ToolCall, ToolRegistry, confirmation_question, new_pending, yes_no
@@ -369,6 +369,9 @@ class Session:
 
         llm = self.svc.llm
         tools = self.svc.tools
+        if await tools.update_route():  # the Mac left or reached the home network
+            llm.set_tools(tools.specs)
+            set_home_context(tools.context)
         messages = build_messages(
             self.history, turn.lang, cfg.groq_history_turns if llm.using_remote else None, with_tools=tools.enabled
         )

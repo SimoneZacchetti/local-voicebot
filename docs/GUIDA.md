@@ -82,6 +82,46 @@ Cosa **non** si può fare (nessuna API): avviare le routine create nell'app Goog
 
 Il server ascolta solo su `127.0.0.1`: non esporlo in rete, chiunque potrebbe comandare la casa.
 
+## Controllo della casa da fuori (Google Assistant)
+
+Se Home Assistant gira nella VM sul Mac e porti il Mac fuori casa, i dispositivi locali (Cast, Matter, Music Assistant) non sono più raggiungibili. In quel caso il voicebot manda i comandi al **cloud di Google**, che li esegue sui dispositivi di casa: luci, prese, TV, speaker, Spotify, termostato, routine di Google Home.
+
+1. In Home Assistant aggiungi l'integrazione **Google Assistant SDK** (*Impostazioni → Dispositivi e servizi → Aggiungi*). Serve un progetto Google Cloud con le credenziali OAuth: la procedura guidata di Home Assistant spiega i passaggi. Accedi con lo stesso account Google di Google Home.
+2. Nel `.env`:
+
+   ```dotenv
+   HOME_ROUTE=auto                 # a casa: strumenti locali; fuori: Google
+   HOME_PROBE=192.168.1.50:8009    # IP di un Google Home/Chromecast di casa (app Google Home → dispositivo → Impostazioni → Informazioni)
+   ```
+
+   Con `HOME_ROUTE=google` usa sempre Google, anche in casa. Con `HOME_ROUTE=ha` (default) usa solo gli strumenti locali.
+3. `uv run python scripts/check_env.py` mostra la modalità attuale (`home route: home` o `away`). Riavvia il server.
+
+Con `auto` il bot controlla ogni 30 s (`HOME_PROBE_TTL_S`) se il Google Home risponde: se sì sei a casa, altrimenti passa a Google. Il cambio avviene da solo, anche a conversazione aperta.
+
+Limiti: Google non conferma l'esito, quindi il bot dice "comando inviato", non "fatto"; cosa suonare lo decide Google, non Music Assistant; è un'API sperimentale che Google può spegnere. Anche via Google, i comandi che citano serrature, porte, cancelli, allarmi o un dispositivo di quel tipo chiedono conferma.
+
+## Controllo della casa da fuori con Home Assistant a casa (Tailscale)
+
+Con [Tailscale](https://tailscale.com) (gratuito per uso personale) il voicebot comanda la casa da qualsiasi rete, come se fossi a casa. Nessuna porta aperta sul router: Mac e Home Assistant entrano in una rete privata cifrata.
+
+**Prerequisito:** Home Assistant deve restare **a casa e sempre acceso** (Home Assistant Green, Raspberry Pi, mini-PC o un Mac fisso). Se gira in una VM sul portatile che porti con te, fuori casa non vede più i dispositivi.
+
+1. **In Home Assistant:** *Impostazioni → Componenti aggiuntivi → Store* → **Tailscale** → Installa → Avvia → *Apri interfaccia web* e accedi con il tuo account Tailscale. Attiva *Avvio all'accensione*.
+2. **Sul Mac:** `brew install --cask tailscale`, apri l'app dalla barra dei menu e accedi con **lo stesso account**.
+3. Nella [console di Tailscale](https://login.tailscale.com/admin/machines) controlla che compaiano entrambi (Home Assistant di solito come `homeassistant`). In *DNS* lascia attivo **MagicDNS**. Sul dispositivo di Home Assistant disattiva *Key expiry*, così non si scollega dopo 180 giorni.
+4. Nel `.env` del voicebot:
+
+   ```dotenv
+   HA_URL=http://homeassistant:8123     # nome MagicDNS; in alternativa l'IP 100.x.y.z mostrato dalla console
+   ```
+
+5. `uv run python scripts/check_env.py`: deve dire `HA_URL … via Tailscale`. Prova poi dall'hotspot del telefono.
+
+Lo stesso indirizzo funziona a casa e fuori: in casa Tailscale si collega in diretta sulla rete locale, senza rallentamenti percepibili. Se Tailscale non è ancora connesso quando avvii il server, il bot parte senza strumenti per la casa e riprova da solo ogni `HA_RETRY_S` secondi (default 30). Musica e annunci partono comunque dagli speaker di casa: Music Assistant gira accanto a Home Assistant.
+
+Il traffico è cifrato da Tailscale, quindi `http://` va bene. **Non** esporre Home Assistant su internet aprendo porte sul router.
+
 ## Groq (opzionale, free tier)
 
 Per usare modelli cloud gratuiti al posto di quelli locali, crea una chiave su <https://console.groq.com> e nel `.env`:

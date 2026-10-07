@@ -27,6 +27,7 @@ player ◄────────────── PCM16 ────  frasi �
 - 🌍 **7 lingue con voce locale** (it, en, fr, de, es, pt, nl), rilevamento automatico
 - 💬 **Chat scritta** nella stessa conversazione della voce
 - 🏠 **Smart home** via Home Assistant MCP, con conferma vocale per serrature e allarmi
+- 🌐 **Anche fuori casa** via Google Assistant, o Tailscale se Home Assistant resta a casa
 - ☁️ **Groq opzionale** (free tier) con fallback automatico ai modelli locali
 
 ## 🚀 Avvio rapido

@@ -6,9 +6,11 @@ Usage: uv run python scripts/check_env.py
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 import numpy as np
@@ -99,6 +101,32 @@ def check_tts() -> None:
             report(FAIL, f"TTS {lang}", str(e))
 
 
+def is_tailscale(url: str) -> bool:
+    host = urlsplit(url).hostname or ""
+    if host.endswith(".ts.net"):
+        return True
+    try:
+        return ipaddress.ip_address(host) in ipaddress.ip_network("100.64.0.0/10")
+    except ValueError:
+        return "." not in host and host != "localhost"  # MagicDNS short name, e.g. "homeassistant"
+
+
+def check_ha_url() -> None:
+    """Home Assistant must be reached over the LAN or a VPN, never exposed on the internet."""
+    url = urlsplit(cfg.ha_url)
+    host = url.hostname or ""
+    if is_tailscale(cfg.ha_url):
+        return report(OK, "HA_URL", f"{host} via Tailscale (works at home and away)")
+    try:
+        public = ipaddress.ip_address(host).is_global
+    except ValueError:
+        public = not (host.endswith(".local") or "." not in host)
+    if public and url.scheme != "https":
+        report(WARN, "HA_URL", f"{host} looks public and uses plain http: the token travels unencrypted. Use Tailscale.")
+    else:
+        report(OK, "HA_URL", f"{host} (local network only)")
+
+
 async def check_home() -> None:
     if cfg.home_backend != "ha":
         return
@@ -107,9 +135,14 @@ async def check_home() -> None:
     from server.ha import HomeAssistant
     from server.tools import ToolRegistry
 
+    check_ha_url()
     ha = HomeAssistant()
     try:
         tools = await ha.list_tools()
+    except httpx.TransportError as e:
+        hint = ("is Tailscale connected on this Mac (menu bar icon) and is the Tailscale add-on running in HA?"
+                if is_tailscale(cfg.ha_url) else "is Home Assistant on and on the same network?")
+        return report(FAIL, f"Home Assistant at {cfg.ha_url}", f"not reachable ({type(e).__name__}): {hint}")
     except Exception as e:  # noqa: BLE001
         return report(FAIL, f"Home Assistant MCP at {cfg.ha_url}{cfg.ha_mcp_path}", f"{e}. Add the 'Model Context Protocol Server' integration.")
     report(OK, "Home Assistant MCP", f"{len(tools)} tools")
@@ -120,6 +153,15 @@ async def check_home() -> None:
     google = "google_assistant_sdk.send_text_command" in ha.services
     report(OK if google else WARN, "Google Assistant SDK integration", "available" if google else "not installed (optional)")
     report(OK if reg._has("announce") else WARN, "announcements", "available" if reg._has("announce") else "set HA_ANNOUNCE_PLAYERS or add the Google Assistant SDK integration")
+    if cfg.home_route != "ha":
+        if not google:
+            report(FAIL, f"HOME_ROUTE={cfg.home_route}", "needs the Google Assistant SDK integration in Home Assistant")
+        elif cfg.home_route == "auto" and not cfg.home_probe:
+            report(FAIL, "HOME_ROUTE=auto", "set HOME_PROBE=<ip>:8009 (a Google Home / Chromecast at home)")
+        else:
+            await reg.update_route()
+            how = "forced" if cfg.home_route == "google" else f"HOME_PROBE {cfg.home_probe}"
+            report(OK, "home route", f"{reg.mode} ({how}): {', '.join(s['function']['name'] for s in reg.specs)}")
 
 
 async def check_groq() -> None:

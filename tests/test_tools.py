@@ -407,3 +407,89 @@ def test_empty_llm_reply_is_retried(home):
         msgs = recv_until(ws, lambda m: m["type"] == "turn_end")
         assert home.home.calls == [("intent__HassTurnOff", {"name": "Luce cucina"})]
         assert msgs[-1]["metrics"]["llm_empty_retries"] == 1
+
+
+class FlakyHome(FakeHome):
+    """Unreachable for the first ``down`` attempts (VPN not up yet)."""
+
+    def __init__(self, down=1):
+        super().__init__()
+        self.down = down
+
+    async def list_tools(self):
+        if self.down:
+            self.down -= 1
+            raise httpx.ConnectError("no route to host")
+        return await super().list_tools()
+
+
+async def test_registry_reports_unreachable_home_and_recovers(monkeypatch):
+    monkeypatch.setattr(cfg, "ha_retry_s", 0.01)
+    svc = Services(stt=FakeStt(), llm=ToolLlm(), tts=FakeTts(), langid=LangId(), tools=ToolRegistry(FlakyHome(down=2)))
+    assert not await main.start_tools(svc)
+    assert not svc.tools.enabled and svc.tools.context == ""
+    await asyncio.wait_for(main.retry_tools(svc), 1)
+    assert svc.tools.enabled and "Luce cucina" in svc.tools.context
+    assert svc.llm.tools == svc.tools.specs
+
+
+class GoogleHome(FakeHome):
+    """Home Assistant with the Google Assistant SDK integration."""
+
+    def __init__(self):
+        super().__init__()
+        self.services = {"google_assistant_sdk.send_text_command", "notify.google_assistant_sdk"}
+        self.sent = []
+
+    async def call_service(self, domain, service, data):
+        self.sent.append((domain, service, data))
+        return {"ok": True}
+
+
+async def test_route_google_exposes_only_google_tools(monkeypatch):
+    monkeypatch.setattr(cfg, "home_route", "google")
+    svc = Services(stt=FakeStt(), llm=ToolLlm(), tts=FakeTts(), langid=LangId(), tools=ToolRegistry(GoogleHome()))
+    assert await main.start_tools(svc)
+    names = [s["function"]["name"] for s in svc.tools.specs]
+    assert names == ["google_assistant", "announce"] and svc.llm.tools == svc.tools.specs
+    assert "AWAY from home" in svc.tools.context and "Luce cucina" in svc.tools.context
+    res = await svc.tools.execute(ToolCall("1", "google_assistant", {"command": "accendi la luce della cucina"}))
+    assert res["ok"] and svc.tools.ha.sent[0][:2] == ("google_assistant_sdk", "send_text_command")
+
+
+async def test_route_auto_switches_with_probe(monkeypatch):
+    monkeypatch.setattr(cfg, "home_route", "auto")
+    monkeypatch.setattr(cfg, "home_probe", "192.168.1.50:8009")
+    monkeypatch.setattr(cfg, "home_probe_ttl_s", 0)
+    at_home = True
+
+    async def fake_probe(target, timeout=0.8):
+        return at_home
+
+    monkeypatch.setattr("server.tools.probe", fake_probe)
+    reg = ToolRegistry(GoogleHome())
+    await reg.start()
+    assert not await reg.update_route() and reg.mode == "home"
+    assert [s["function"]["name"] for s in reg.specs] == ["intent__HassTurnOff", "google_assistant", "announce"]
+    at_home = False
+    assert await reg.update_route() and reg.mode == "away"
+    assert [s["function"]["name"] for s in reg.specs] == ["google_assistant", "announce"]
+    at_home = True
+    assert await reg.update_route() and reg.mode == "home" and "AWAY" not in reg.context
+
+
+async def test_route_without_google_integration_stays_local(monkeypatch):
+    monkeypatch.setattr(cfg, "home_route", "google")
+    reg = ToolRegistry(FakeHome())
+    await reg.start()
+    assert not await reg.update_route() and reg.mode == "home"
+
+
+def test_google_command_naming_a_risky_device_needs_confirmation(monkeypatch):
+    monkeypatch.setattr(cfg, "confirm_risky", True)
+    reg = ToolRegistry()
+    reg.index_entities([{"entity_id": "lock.nuki", "attributes": {"friendly_name": "Nuki"}},
+                        {"entity_id": "light.cucina", "attributes": {"friendly_name": "Luce cucina"}}])
+    assert reg.risk(ToolCall("1", "google_assistant", {"command": "sblocca il Nuki"}))
+    assert reg.risk(ToolCall("1", "google_assistant", {"command": "apri il cancello"}))
+    assert reg.risk(ToolCall("1", "google_assistant", {"command": "accendi la luce cucina"})) is None

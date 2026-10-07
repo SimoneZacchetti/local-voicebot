@@ -119,6 +119,12 @@ class Config:
     home_backend: str = field(default_factory=lambda: _env("HOME_BACKEND", "none"))  # none | ha
     ha_url: str = field(default_factory=lambda: _env("HA_URL", "http://homeassistant.local:8123"))
     ha_token: str = field(default_factory=lambda: _env("HA_TOKEN", ""))
+    # Where home commands go: "ha" (local tools), "google" (Google Assistant cloud only, works away from home),
+    # "auto" (local when HOME_PROBE answers, i.e. the Mac is on the home network; Google otherwise)
+    home_route: str = field(default_factory=lambda: _env("HOME_ROUTE", "ha"))
+    home_probe: str = field(default_factory=lambda: _env("HOME_PROBE", ""))  # host:port on the home LAN
+    home_probe_ttl_s: float = field(default_factory=lambda: _env_float("HOME_PROBE_TTL_S", 30.0))
+    ha_retry_s: float = field(default_factory=lambda: _env_float("HA_RETRY_S", 30.0))  # 0 = no retry
     ha_mcp_path: str = field(default_factory=lambda: _env("HA_MCP_PATH", "/api/mcp"))
     ha_tool_allowlist: list[str] = field(default_factory=lambda: _env_list("HA_TOOL_ALLOWLIST", ""))
     ha_announce_players: list[str] = field(default_factory=lambda: _env_list("HA_ANNOUNCE_PLAYERS", ""))
