@@ -152,7 +152,8 @@ class Config:
     # `tailscale serve` (never funnel). Every request on it must carry an allowed Tailscale login.
     remote_enabled: bool = field(default_factory=lambda: _env_bool("REMOTE_ENABLED", False))
     remote_port: int = field(default_factory=lambda: _env_int("REMOTE_PORT", 8001))
-    public_host: str = field(default_factory=lambda: _env("PUBLIC_HOST", "").lower())  # e.g. voicebot-mac.tailXXXX.ts.net
+    # e.g. voicebot-mac.tailXXXX.ts.net, plus ":<port>" when `tailscale serve --https=<port>` is not 443
+    public_host: str = field(default_factory=lambda: _env("PUBLIC_HOST", "").lower())
     ts_allowed_logins: list[str] = field(default_factory=lambda: [x.lower() for x in _env_list("TS_ALLOWED_LOGINS", "")])
     api_tokens: list[str] = field(default_factory=lambda: _env_list("API_TOKENS", ""))  # one per device (Shortcuts)
 

@@ -160,3 +160,12 @@ def test_startup_refuses_incomplete_remote_config(monkeypatch):
     monkeypatch.setattr(cfg, "ts_allowed_logins", [ME])
     monkeypatch.setattr(cfg, "api_tokens", [TOKEN])
     assert entry.config_problems() == []
+
+
+def test_public_host_with_custom_https_port(remote, monkeypatch):
+    """`tailscale serve --https=9443`: Origin carries the port, Host is checked without it."""
+    monkeypatch.setattr(cfg, "public_host", f"{HOST}:9443")
+    headers = {"Tailscale-User-Login": ME, "Origin": f"{ORIGIN}:9443"}
+    with remote.websocket_connect(ws_url(), headers=headers) as ws:
+        assert recv(ws)["type"] == "ready"
+    assert refused(remote, ws_url(), {"Tailscale-User-Login": ME, "Origin": ORIGIN}) == 1008

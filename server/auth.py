@@ -55,8 +55,12 @@ def valid_bearer(headers: dict[str, str]) -> bool:
     return any(hits)
 
 
+def _strip_port(host: str) -> str:
+    return host.rsplit(":", 1)[0].strip("[]").lower()
+
+
 def _host(headers: dict[str, str]) -> str:
-    return headers.get("host", "").rsplit(":", 1)[0].strip("[]").lower()
+    return _strip_port(headers.get("host", ""))
 
 
 def denial(scope: Scope) -> str | None:
@@ -76,7 +80,7 @@ def denial(scope: Scope) -> str | None:
         return "remote disabled"
     if ts_login(h) not in cfg.ts_allowed_logins:
         return "login"
-    if _host(h) != cfg.public_host:
+    if _host(h) != _strip_port(cfg.public_host):
         return "host"
     expected = f"https://{cfg.public_host}"
     if origin is not None and origin != expected:
