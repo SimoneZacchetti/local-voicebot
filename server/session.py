@@ -56,6 +56,19 @@ class Services:
     tts: PocketTts
     langid: LangId
     tools: ToolRegistry = field(default_factory=ToolRegistry)
+    # Conversation kept per client after its WebSocket closes: the phone drops it on screen
+    # lock or network change and reconnects with the same client id (web/app.js).
+    histories: dict[str, SavedHistory] = field(default_factory=dict)
+
+
+@dataclass
+class SavedHistory:
+    history: list[dict]
+    lang: str
+    saved_at: float
+
+
+MAX_SAVED_HISTORIES = 20
 
 
 @dataclass
@@ -102,6 +115,8 @@ class Session:
         self.prefilling = False
         self.epoch = 0  # bumped on reset: utterances transcribed across a reset are dropped
         self.voice = False  # the client has a voice session running (mic + player)
+        cid = str(ws.query_params.get("client", "")) if ws is not None else ""
+        self.client_id = cid if 16 <= len(cid) <= 64 and cid.replace("-", "").isalnum() else ""
 
     # -- transport --------------------------------------------------------------------
 
@@ -131,14 +146,37 @@ class Session:
         task.add_done_callback(_log_task_error)
         return task
 
+    def _resume_history(self) -> int:
+        """Continue this client's conversation if it reconnected recently. Returns its turns."""
+        saved = self.svc.histories.pop(self.client_id, None) if self.client_id else None
+        if saved is None or time.monotonic() - saved.saved_at > cfg.client_history_ttl_s:
+            return 0
+        self.history, self.lang = saved.history, saved.lang
+        self.greeted = True  # mid-conversation: no greeting
+        return sum(m["role"] == "user" for m in self.history)
+
+    def _save_history(self) -> None:
+        if not self.client_id or not self.history:
+            return
+        # A pending confirmation is never carried over: after a reconnect the bot asks again.
+        self.svc.histories[self.client_id] = SavedHistory(list(self.history), self.lang, time.monotonic())
+        now = time.monotonic()
+        stale = [k for k, v in self.svc.histories.items() if now - v.saved_at > cfg.client_history_ttl_s]
+        for k in stale:
+            del self.svc.histories[k]
+        while len(self.svc.histories) > MAX_SAVED_HISTORIES:
+            del self.svc.histories[min(self.svc.histories, key=lambda k: self.svc.histories[k].saved_at)]
+
     async def run(self) -> None:
         writer = asyncio.create_task(self._writer())
+        resumed = self._resume_history()
         self.send({
             "type": "ready",
             "tts_rate": TTS_RATE,
             "stt_rate": SAMPLE_RATE,
             "lang": self.lang,
             "vad": {"redemption_ms": cfg.vad_redemption_ms},
+            "resumed": resumed,
             "providers": {"stt": self.svc.stt.name, "llm": self.svc.llm.name,
                           "home_tools": len(self.svc.tools.specs),
                           "llm_model": cfg.groq_llm_model if self.svc.llm.name == "groq" else cfg.llm_model,
@@ -173,6 +211,7 @@ class Session:
                 self.current.task.cancel()
             for t in list(self.tasks):
                 t.cancel()
+            self._save_history()
             self.out.put_nowait(None)
             await asyncio.gather(writer, return_exceptions=True)
 

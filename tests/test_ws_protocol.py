@@ -380,3 +380,37 @@ def test_typed_message_interrupts_without_merging(client):
         h = client.sessions[0].history
         assert [m["role"] for m in h] == ["user", "assistant", "user", "assistant"]
         assert h[1]["content"] == "Certo, la Toscana è bellissima e piena di storia.…"
+
+
+CLIENT = "0123456789abcdef0123"
+
+
+def test_reconnecting_client_resumes_its_conversation(client):
+    with client.websocket_connect(f"/ws?client={CLIENT}") as ws:
+        assert recv(ws)["resumed"] == 0
+        ws.send_json({"type": "text", "text": "Ciao, mi racconti qualcosa sulla Toscana?"})
+        recv_until(ws, lambda m: m["type"] == "turn_end")
+    # Same client id (screen unlocked, network changed): the conversation goes on, no greeting.
+    with client.websocket_connect(f"/ws?client={CLIENT}") as ws:
+        assert recv(ws)["resumed"] == 1
+        ws.send_json({"type": "hello"})
+        ws.send_json({"type": "text", "text": "e poi cosa mi consigli di mangiare"})
+        msgs = recv_until(ws, lambda m: m["type"] == "turn_end")
+        assert not any(m["type"] == "sentence" and "Sono pronto" in m["text"] for m in msgs)
+        history = client.sessions[-1].history
+        assert history[0]["content"].startswith("Ciao, mi racconti") and len(history) == 4
+    # Another client, or none, starts from scratch.
+    with client.websocket_connect("/ws?client=ffffffffffffffffffff") as ws:
+        assert recv(ws)["resumed"] == 0
+    with client.websocket_connect("/ws") as ws:
+        assert recv(ws)["resumed"] == 0
+
+
+def test_saved_history_expires(client, monkeypatch):
+    monkeypatch.setattr(cfg, "client_history_ttl_s", 0)
+    with client.websocket_connect(f"/ws?client={CLIENT}x") as ws:
+        recv(ws)
+        ws.send_json({"type": "text", "text": "Ciao, mi racconti qualcosa sulla Toscana?"})
+        recv_until(ws, lambda m: m["type"] == "turn_end")
+    with client.websocket_connect(f"/ws?client={CLIENT}x") as ws:
+        assert recv(ws)["resumed"] == 0

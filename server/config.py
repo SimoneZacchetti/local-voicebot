@@ -148,6 +148,9 @@ class Config:
     local_origins: list[str] = field(default_factory=lambda: _env_list(
         "LOCAL_ORIGINS", ",".join(f"http://{h}:{_env('PORT', '8000')}" for h in ("127.0.0.1", "localhost"))))
 
+    # Seconds a closed client's conversation is kept for its reconnection (screen lock, network change)
+    client_history_ttl_s: float = field(default_factory=lambda: _env_float("CLIENT_HISTORY_TTL_S", 900.0))
+
     # Remote access from the phone: a second loopback port published on the tailnet by
     # `tailscale serve` (never funnel). Every request on it must carry an allowed Tailscale login.
     remote_enabled: bool = field(default_factory=lambda: _env_bool("REMOTE_ENABLED", False))

@@ -46,6 +46,22 @@ let analyserOut = null; // bot voice
 let analyserIn = null; // user mic
 let micSource = null;
 let micStream = null;
+let wakeLock = null;
+let reconnectTimer = null;
+let reconnectTries = 0;
+let hadConnection = false;
+
+// Stable per-device id: after a screen lock or network change the server resumes this
+// client's conversation (server/session.py SavedHistory).
+const CLIENT_ID = (() => {
+  try {
+    let id = localStorage.getItem("voicebot-client");
+    if (!id) localStorage.setItem("voicebot-client", (id = crypto.randomUUID()));
+    return id;
+  } catch {
+    return crypto.randomUUID(); // private mode: per page load
+  }
+})();
 
 // ---------------------------------------------------------------- UI
 
@@ -58,8 +74,11 @@ function setState(state, text) {
   if (text !== undefined) $("status").textContent = text;
 }
 
+const wsOpen = () => ws?.readyState === WebSocket.OPEN;
+
 function refreshState() {
   if (!running) return setState("idle", starting ? "Avvio…" : "Premi per iniziare");
+  if (!wsOpen() && !starting) return setState("thinking", reconnectTries > 3 ? "Mac non raggiungibile" : "Riconnessione…");
   if (botActive() && !bargePaused) return setState("speaking", "Tocca la sfera o parla per interrompere");
   if (muted) return setState("listening", "Microfono disattivato");
   setState("listening", "Ti ascolto");
@@ -336,7 +355,7 @@ function onFirstAudio(turn) {
 
 function connect() {
   return new Promise((resolve, reject) => {
-    const sock = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+    const sock = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?client=${CLIENT_ID}`);
     let opened = false;
     ws = sock;
     sock.binaryType = "arraybuffer";
@@ -346,24 +365,70 @@ function connect() {
         if (m.type === "ready") {
           opened = true;
           resolve((readyMsg = m));
+          if (hadConnection) onReconnected(m);
+          hadConnection = true;
         }
         onControl(m);
       } else {
         onAudio(e.data);
       }
     };
-    sock.onerror = () => reject(new Error("WebSocket error"));
+    sock.onerror = () => reject(new Error("Mac non raggiungibile (acceso? Tailscale attivo?)"));
     sock.onclose = () => {
       reject(new Error("connessione chiusa dal server")); // no-op once resolved
       if (ws !== sock) return; // closed by teardown
       ws = readyMsg = null;
-      if (opened) notice("Connessione persa con il server.");
-      if (running) stop();
+      if (!running) {
+        if (opened) notice("Connessione persa con il server.");
+        return; // the chat reconnects on the next message
+      }
+      // Voice on: screen lock, Wi-Fi <-> cellular, Mac restarted... keep the mic and retry.
+      flushPlayback();
+      scheduleReconnect();
+      refreshState();
     };
   });
 }
 
 let connecting = null;
+
+function scheduleReconnect() {
+  if (reconnectTimer || document.hidden || !running) return;
+  const delay = Math.min(10000, 500 * 2 ** reconnectTries);
+  reconnectTries += 1;
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    try {
+      await ensureConnected();
+    } catch {
+      refreshState();
+      scheduleReconnect();
+    }
+  }, delay);
+}
+
+function onReconnected(ready) {
+  reconnectTries = 0;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  if (running) ws.send(JSON.stringify({ type: "hello", greet: false }));
+  if (!ready.resumed && $("log").querySelector(".msg")) notice("Il server è ripartito: conversazione nuova.");
+  refreshState();
+}
+
+// Keep the phone screen on while talking (iOS 16.4+, reliable in home-screen apps from 18.4).
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLock && "wakeLock" in navigator && !document.hidden) {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => (wakeLock = null));
+    } else if (!on && wakeLock) {
+      await wakeLock.release();
+    }
+  } catch {
+    wakeLock = null;
+  }
+}
 
 function ensureConnected() {
   if (ws?.readyState === WebSocket.OPEN && readyMsg) return Promise.resolve(readyMsg);
@@ -386,6 +451,7 @@ function onControl(m) {
   switch (m.type) {
     case "ready": {
       ttsRate = m.tts_rate;
+      if (m.resumed && !$("log").querySelector(".msg")) notice(`Conversazione ripresa (${m.resumed} messaggi)`);
       redemptionMs = m.vad?.redemption_ms ?? redemptionMs;
       const p = m.providers;
       $("providers").textContent = `STT ${p.stt} · LLM ${p.llm_model} (${p.llm}) · TTS ${p.tts}`;
@@ -495,6 +561,7 @@ function sendUtterance(f32) {
   const out = new Uint8Array(header.byteLength + pcm.byteLength);
   out.set(new Uint8Array(header.buffer), 0);
   out.set(new Uint8Array(pcm.buffer), header.byteLength);
+  if (!wsOpen()) return; // reconnecting: the sentence is lost, the status says so
   speechEndAt.set(uttId, performance.now());
   lastUttSent = uttId;
   ws.send(out.buffer);
@@ -607,6 +674,8 @@ async function start() {
     $("start").disabled = false;
   }
   running = true;
+  reconnectTries = 0;
+  keepAwake(true);
   $("start").hidden = true;
   document.querySelector(".controls").hidden = false;
   refreshState();
@@ -628,6 +697,9 @@ async function stop() {
   if (botActive()) silenceBot();
   ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "voice", on: false }));
   running = false;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  keepAwake(false);
   setMuted(false);
   $("start").hidden = false;
   document.querySelector(".controls").hidden = true;
@@ -742,6 +814,29 @@ $("reset").addEventListener("click", () => {
 });
 $("aec-route").addEventListener("change", routeAudio);
 $("resume").addEventListener("click", resumeAudio);
+
+// Screen locked / app switched: iOS suspends the page and usually drops the socket and mic.
+document.addEventListener("visibilitychange", () => {
+  if (!running) return;
+  if (document.hidden) {
+    if (botActive()) silenceBot(); // the server keeps only what was heard
+    return;
+  }
+  keepAwake(true);
+  onContextState(); // context still suspended or mic ended: show "tap to resume"
+  if (micStream?.getAudioTracks().some((t) => t.readyState === "ended")) $("resume").hidden = false;
+  if (!wsOpen()) {
+    reconnectTries = 0;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    scheduleReconnect();
+  }
+  refreshState();
+});
+
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register("sw.js").catch((e) => console.warn("service worker", e));
+}
 if (IOS) $("aec-route").closest("label").hidden = true; // iOS: always the built-in echo cancellation
 speechSynthesis.getVoices();
 fitChatInput();
