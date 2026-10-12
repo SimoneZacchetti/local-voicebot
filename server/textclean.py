@@ -90,7 +90,11 @@ def is_echo(transcript: str, bot_sentences: list[str], threshold: float = 0.75) 
         return False
     if len(tw) <= 3:
         joined = " ".join(tw)
-        return any(difflib.SequenceMatcher(None, joined, " ".join(sw)).ratio() >= 0.9 for sw in sentences)
+        if any(difflib.SequenceMatcher(None, joined, " ".join(sw)).ratio() >= 0.9 for sw in sentences):
+            return True
+        # Exactly three words lifted verbatim from a sentence ("stavamo solo scambiandoci"): the
+        # phone speaker leaking the reply. Two-word answers ("il mare") are never judged echo.
+        return len(tw) == 3 and any(tw == sw[i:i + 3] for sw in sentences for i in range(len(sw) - 2))
     # Echo is usually a contiguous fragment, possibly spanning two sentences, with a few
     # words mis-transcribed: count how many transcript words align with the bot's words.
     bot_words = [w for sw in sentences for w in sw]

@@ -15,6 +15,10 @@ const BARGE_MS = IOS ? 500 : 300; // ...sustained for this long
 const FRAME_MS = 32; // Silero v5 frame: 512 samples @ 16 kHz
 const BARGE_FRAMES = Math.ceil(BARGE_MS / FRAME_MS);
 const FLAG_PLAYING = 1;
+// Remote clients (the phone over Tailscale) get a small jitter buffer before each burst of
+// bot audio: Wi-Fi power saving and cellular add uneven delays that otherwise stutter.
+const REMOTE = !["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
+const PREBUFFER_MS = REMOTE ? 200 : 0;
 
 let ws = null;
 let readyMsg = null; // "ready" of the open WebSocket (reused when voice starts after chatting)
@@ -210,7 +214,7 @@ function unlockAudio() {
 
 // A phone call, Siri or another app took the audio: playback and mic stop until a tap.
 function onContextState() {
-  if (!running || !ctx) return;
+  if (!running || !ctx || document.hidden) return;
   $("resume").hidden = ctx.state === "running";
 }
 
@@ -237,7 +241,10 @@ async function setupAudio() {
   }
   await ctx.resume();
   await ctx.audioWorklet.addModule("player-worklet.js");
-  player = new AudioWorkletNode(ctx, "pcm-player", { outputChannelCount: [1] });
+  player = new AudioWorkletNode(ctx, "pcm-player", {
+    outputChannelCount: [1],
+    processorOptions: { prebuffer: Math.round((ctx.sampleRate * PREBUFFER_MS) / 1000) },
+  });
   analyserOut = ctx.createAnalyser();
   analyserOut.fftSize = 512;
   analyserOut.smoothingTimeConstant = 0.55;
@@ -820,10 +827,15 @@ document.addEventListener("visibilitychange", () => {
   if (!running) return;
   if (document.hidden) {
     if (botActive()) silenceBot(); // the server keeps only what was heard
+    // Wind audio down ourselves (silent output, muted mic, suspended context) instead of
+    // letting iOS cut a live session a moment after the lock, which can make a sound.
+    micStream?.getAudioTracks().forEach((t) => (t.enabled = false));
+    ctx?.suspend().catch(() => {});
     return;
   }
   keepAwake(true);
-  onContextState(); // context still suspended or mic ended: show "tap to resume"
+  if (!muted) micStream?.getAudioTracks().forEach((t) => (t.enabled = true));
+  ctx?.resume().catch(() => {}).finally(onContextState); // not allowed without a tap: "tap to resume"
   if (micStream?.getAudioTracks().some((t) => t.readyState === "ended")) $("resume").hidden = false;
   if (!wsOpen()) {
     reconnectTries = 0;

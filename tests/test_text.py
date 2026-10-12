@@ -149,6 +149,14 @@ def test_echo_guard_keeps_short_real_answers():
     assert is_echo("Preferisci il mare o la montagna", bot)
 
 
+def test_three_word_fragment_of_the_reply_is_echo():
+    bot = ["Stavamo solo scambiandoci due chiacchiere, niente di particolare."]
+    assert is_echo("stavamo solo scambiandoci", bot)
+    assert is_echo("due chiacchiere niente", bot)
+    assert not is_echo("stavamo parlando di", bot)
+    assert not is_echo("solo due chiacchiere", bot)  # not contiguous in the reply
+
+
 def test_clean_keeps_math_identifiers_and_units():
     assert clean_for_tts("Il risultato di 3 * 4 è dodici") == "Il risultato di 3 per 4 è dodici"
     assert clean_for_tts("3 * 4", "en") == "3 times 4"
