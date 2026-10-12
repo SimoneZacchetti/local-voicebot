@@ -144,6 +144,9 @@ class Session:
                           "llm_model": cfg.groq_llm_model if self.svc.llm.name == "groq" else cfg.llm_model,
                           "tts": "pocket"},
         })
+        # A client just connected (e.g. the phone app opened): page the model back into memory now,
+        # not on the first question. After idle time macOS may have swapped it out (~15 s stall).
+        self._spawn(self.prefill())
         try:
             while True:
                 msg = await self.ws.receive()
