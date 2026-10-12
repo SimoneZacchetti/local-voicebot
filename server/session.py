@@ -16,6 +16,7 @@ import json
 import logging
 import struct
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -115,6 +116,7 @@ class Session:
         self.prefilling = False
         self.epoch = 0  # bumped on reset: utterances transcribed across a reset are dropped
         self.voice = False  # the client has a voice session running (mic + player)
+        self.confirm_ttl_s: float | None = None  # time to answer "are you sure?" (None: CONFIRM_TTL_S)
         cid = str(ws.query_params.get("client", "")) if ws is not None else ""
         self.client_id = cid if 16 <= len(cid) <= 64 and cid.replace("-", "").isalnum() else ""
 
@@ -332,20 +334,25 @@ class Session:
     async def handle_text(self, m: dict) -> None:
         """Typed chat message: same turn pipeline as speech, minus STT. The reply is spoken
         only while a voice session is running."""
-        text = " ".join(str(m.get("text", "")).split())[:MAX_TEXT_CHARS]
-        if not any(ch.isalnum() for ch in text):
-            return
-        t0 = time.perf_counter()
         async with self.lock:
-            lang = self.svc.langid.requested(text) or self.svc.langid.resolve(text, self.lang)
-            self.lang = lang
-            # Typed text is never a continuation of the previous message: no merge.
-            self._interrupt_current(_int(m.get("heard_turn"), -1), _int(m.get("heard_seq"), -1),
-                                    bool(m.get("playing")), t0, merge=False)
-            turn = self._new_turn(0, text, lang, t0)
-            self.send({"type": "transcript", "turn": turn.id, "utt_id": 0, "text": text,
-                       "lang": lang, "stt": "typed", "merged": False})
-            turn.task = self._spawn(self.run_turn(turn))
+            self.run_text(str(m.get("text", "")), _int(m.get("heard_turn"), -1), _int(m.get("heard_seq"), -1),
+                          bool(m.get("playing")))
+
+    def run_text(self, text: str, heard_turn: int = -1, heard_seq: int = -1, playing: bool = False) -> Turn | None:
+        """Start a turn for a typed message (chat, Siri Shortcut). The caller holds ``self.lock``."""
+        text = " ".join(text.split())[:MAX_TEXT_CHARS]
+        if not any(ch.isalnum() for ch in text):
+            return None
+        t0 = time.perf_counter()
+        lang = self.svc.langid.requested(text) or self.svc.langid.resolve(text, self.lang)
+        self.lang = lang
+        # Typed text is never a continuation of the previous message: no merge.
+        self._interrupt_current(heard_turn, heard_seq, playing, t0, merge=False)
+        turn = self._new_turn(0, text, lang, t0)
+        self.send({"type": "transcript", "turn": turn.id, "utt_id": 0, "text": text,
+                   "lang": lang, "stt": "typed", "merged": False})
+        turn.task = self._spawn(self.run_turn(turn))
+        return turn
 
     def _supersede(self, turn: Turn) -> None:
         """Stop ``turn`` for good: it may not act or ask anything after this point."""
@@ -577,7 +584,7 @@ class Session:
         if risky and not turn.superseded and self.current is turn:
             # All risky actions of the round in one question and one pending action.
             question = confirmation_question([why for _, why in risky], turn.lang)
-            self.pending = new_pending([c for c, _ in risky], turn.lang, question, turn.id)
+            self.pending = new_pending([c for c, _ in risky], turn.lang, question, turn.id, self.confirm_ttl_s)
             self.send({"type": "confirm", "turn": turn.id, "action": question})
         return results
 
@@ -636,6 +643,24 @@ class Session:
         turn.mark("first_audio_ms")
         self.send({"type": "tts_fallback", "turn": turn.id, "seq": seq,
                    "lang": BCP47.get(turn.lang, turn.lang), "text": text})
+
+
+class HeadlessSession(Session):
+    """A conversation without a WebSocket, for one-shot commands (server/phone.py).
+
+    Never speaks (no voice session), so replies are text only; client messages are kept
+    in a short buffer for diagnostics instead of being sent anywhere.
+    """
+
+    def __init__(self, svc: Services) -> None:
+        super().__init__(None, svc)
+        self.events: deque[dict] = deque(maxlen=64)
+
+    def send(self, msg: dict) -> None:
+        self.events.append(msg)
+
+    def send_audio(self, turn: Turn, seq: int, pcm16: bytes) -> bool:
+        return False
 
 
 def _log_task_error(task: asyncio.Task) -> None:

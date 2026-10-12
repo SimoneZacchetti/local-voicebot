@@ -159,6 +159,13 @@ class Config:
     public_host: str = field(default_factory=lambda: _env("PUBLIC_HOST", "").lower())
     ts_allowed_logins: list[str] = field(default_factory=lambda: [x.lower() for x in _env_list("TS_ALLOWED_LOGINS", "")])
     api_tokens: list[str] = field(default_factory=lambda: _env_list("API_TOKENS", ""))  # one per device (Shortcuts)
+    # /api/command (Siri Shortcuts): wait at most this long for the reply, then answer "running"
+    api_timeout_s: float = field(default_factory=lambda: _env_float("API_TIMEOUT_S", 20.0))
+    phone_session_ttl_s: float = field(default_factory=lambda: _env_float("PHONE_SESSION_TTL_S", 600.0))
+    # Locks/doors/alarms from the API: refused unless API_ALLOW_RISKY, then confirmed with /api/confirm
+    api_allow_risky: bool = field(default_factory=lambda: _env_bool("API_ALLOW_RISKY", False))
+    api_confirm_ttl_s: float = field(default_factory=lambda: _env_float("API_CONFIRM_TTL_S", 60.0))
+    api_confirm_pin: str = field(default_factory=lambda: _env("API_CONFIRM_PIN", ""))
 
 
 cfg = Config()

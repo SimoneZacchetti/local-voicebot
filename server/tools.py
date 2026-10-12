@@ -400,5 +400,5 @@ async def probe(target: str, timeout: float = 0.8) -> bool:
     return True
 
 
-def new_pending(calls: list[ToolCall], lang: str, question: str, turn_id: int) -> PendingAction:
-    return PendingAction(calls, lang, question, time.monotonic() + cfg.confirm_ttl_s, turn_id)
+def new_pending(calls: list[ToolCall], lang: str, question: str, turn_id: int, ttl: float | None = None) -> PendingAction:
+    return PendingAction(calls, lang, question, time.monotonic() + (cfg.confirm_ttl_s if ttl is None else ttl), turn_id)

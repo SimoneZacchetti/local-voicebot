@@ -11,9 +11,11 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 
+from .api import router as api_router
 from .auth import RemoteGate
 from .config import cfg
 from .langid import LangId
+from .phone import PhoneSessions
 from .llm import LlmRouter
 from .prompts import set_home_context
 from .session import Services, Session
@@ -83,6 +85,7 @@ async def warmup(svc: Services) -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.svc = build_services()
+    app.state.phone = PhoneSessions(app.state.svc)
     tools_ok = await (warmup if cfg.warmup else start_tools)(app.state.svc)
     retry = None if tools_ok or cfg.ha_retry_s <= 0 else asyncio.create_task(retry_tools(app.state.svc))
     yield
@@ -92,6 +95,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(RemoteGate)  # local/remote access rules: server/auth.py
+app.include_router(api_router)
 
 
 @app.websocket("/ws")
