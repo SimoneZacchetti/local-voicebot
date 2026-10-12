@@ -80,7 +80,7 @@ Cosa **non** si può fare (nessuna API): avviare le routine create nell'app Goog
 
 8. `uv run python scripts/check_env.py` verifica connessione, strumenti, dispositivi esposti e annunci. Riavvia il server: nei log vedi `home tools: …`.
 
-Il server ascolta solo su `127.0.0.1`: non esporlo in rete, chiunque potrebbe comandare la casa.
+Il server ascolta solo su `127.0.0.1`: non esporlo in rete, chiunque potrebbe comandare la casa. Per usarlo dall'iPhone c'è una via sicura (Tailscale, login e token): vedi [IPHONE.md](IPHONE.md).
 
 ## Controllo della casa da fuori (Google Assistant)
 

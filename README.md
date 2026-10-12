@@ -28,6 +28,7 @@ player ◄────────────── PCM16 ────  frasi �
 - 💬 **Chat scritta** nella stessa conversazione della voce
 - 🏠 **Smart home** via Home Assistant MCP, con conferma vocale per serrature e allarmi
 - 🌐 **Anche fuori casa** via Google Assistant, o Tailscale se Home Assistant resta a casa
+- 📱 **Dall'iPhone**: app sulla Home, Siri e widget, via Tailscale ([docs/IPHONE.md](docs/IPHONE.md))
 - ☁️ **Groq opzionale** (free tier) con fallback automatico ai modelli locali
 
 ## 🚀 Avvio rapido
@@ -56,7 +57,7 @@ Setup di Home Assistant, Groq, configurazione completa, script E2E e struttura d
 
 ## 🔒 Sicurezza
 
-I segreti (`GROQ_API_KEY`, `HA_TOKEN`) vivono solo in `.env`, che è escluso da git. Il server ascolta su `127.0.0.1`: non esporlo in rete.
+I segreti (`GROQ_API_KEY`, `HA_TOKEN`) vivono solo in `.env`, che è escluso da git. Il server ascolta solo su `127.0.0.1`; dal telefono si raggiunge esclusivamente via `tailscale serve` con login e token ([docs/IPHONE.md](docs/IPHONE.md#4-sicurezza)). Mai funnel, mai `0.0.0.0`.
 
 ## 📄 Licenze
 
