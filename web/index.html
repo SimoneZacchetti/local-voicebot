@@ -30,6 +30,8 @@
       </div>
     </main>
 
+    <button id="resume" class="resume" hidden>Audio in pausa · tocca per riprendere</button>
+
     <div id="confirm" class="confirm" hidden>
       <button id="confirm-yes" class="pill yes">Sì</button>
       <button id="confirm-no" class="pill">No</button>
@@ -66,7 +68,7 @@
     </div>
     <section id="log" class="log"></section>
     <form id="chat" class="chat" autocomplete="off">
-      <textarea id="chat-input" rows="1" maxlength="2000" placeholder="Scrivi un messaggio…" aria-label="Messaggio"></textarea>
+      <textarea id="chat-input" rows="1" maxlength="2000" enterkeyhint="send" placeholder="Scrivi un messaggio…" aria-label="Messaggio"></textarea>
       <button id="chat-send" class="send-btn" type="submit" aria-label="Invia" title="Invia">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
       </button>

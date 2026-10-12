@@ -46,6 +46,7 @@ button { font: inherit; color: inherit; }
 svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 .app {
+  height: 100vh;
   height: 100dvh;
   display: grid;
   grid-template-rows: auto 1fr auto auto;
@@ -64,16 +65,16 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 }
 .topbar-actions { display: flex; gap: 4px; }
 .icon-btn {
-  width: 40px; height: 40px; border-radius: 12px; border: none; background: transparent;
+  width: 44px; height: 44px; border-radius: 12px; border: none; background: transparent;
   display: grid; place-items: center; cursor: pointer; color: var(--muted);
   transition: background 0.2s, color 0.2s;
 }
-.icon-btn:hover { background: var(--surface); color: var(--text); }
 
 /* ---- stage: orb + captions ---- */
 .stage { position: relative; display: grid; place-items: center; min-height: 0; }
 #viz {
   width: min(100%, 78vh, 640px);
+  width: min(100%, 78svh, 640px);
   aspect-ratio: 1;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -126,7 +127,6 @@ body[data-state="user-speaking"] .status, body[data-state="speaking"] .status { 
   box-shadow: 0 10px 30px rgba(77, 110, 255, 0.45);
   transition: transform 0.15s, box-shadow 0.2s, opacity 0.2s;
 }
-.start-btn:hover { transform: translateY(-1px); box-shadow: 0 14px 36px rgba(77, 110, 255, 0.55); }
 .start-btn:active { transform: scale(0.98); }
 .start-btn[hidden] { display: none; }
 .start-btn[disabled] { opacity: 0.6; cursor: progress; }
@@ -140,7 +140,6 @@ body[data-state="user-speaking"] .status, body[data-state="speaking"] .status { 
   backdrop-filter: blur(12px);
   transition: transform 0.15s, background 0.2s;
 }
-.round-btn:hover { transform: translateY(-1px); background: color-mix(in srgb, var(--surface) 100%, var(--text) 6%); }
 .round-btn:active { transform: scale(0.96); }
 .round-btn.end { background: var(--danger); border-color: transparent; color: #fff; }
 .round-btn .mic-off { display: none; }
@@ -188,11 +187,11 @@ body.muted #mute .mic-off { display: block; }
 .chat:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .chat textarea {
   flex: 1; min-width: 0; max-height: 140px; padding: 7px 0; border: none; outline: none; resize: none;
-  background: transparent; color: var(--text); font: inherit; font-size: 15px; line-height: 1.4;
+  background: transparent; color: var(--text); font: inherit; font-size: 16px; line-height: 1.4;
 }
 .chat textarea::placeholder { color: var(--faint); }
 .send-btn {
-  flex: none; width: 34px; height: 34px; border-radius: 50%; border: none; cursor: pointer;
+  flex: none; width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer;
   display: grid; place-items: center; color: #fff; background: var(--accent);
   transition: opacity 0.2s;
 }
@@ -203,6 +202,17 @@ body.muted #mute .mic-off { display: block; }
 .toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
 .text-btn { align-self: flex-start; background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font-size: 14px; }
 .providers { margin: 0; font-size: 12px; color: var(--faint); }
+
+.icon-btn:active, .text-btn:active { opacity: 0.6; }
+* { -webkit-tap-highlight-color: transparent; }
+
+/* ---- audio interrupted (call, Siri): iOS needs a tap to resume ---- */
+.resume {
+  position: relative; z-index: 3; /* above the orb canvas, which can overflow its row */
+  justify-self: center; margin-top: 8px; padding: 12px 20px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--accent); color: #fff; font-weight: 600; font-size: 15px;
+}
+.resume[hidden] { display: none; }
 
 /* ---- toast for errors ---- */
 .toast {
@@ -217,6 +227,12 @@ body.muted #mute .mic-off { display: block; }
   .captions { bottom: 0; }
   .round-btn { width: 56px; height: 56px; }
 }
+@media (hover: hover) {
+  .icon-btn:hover { background: var(--surface); color: var(--text); }
+  .start-btn:hover { transform: translateY(-1px); box-shadow: 0 14px 36px rgba(77, 110, 255, 0.55); }
+  .round-btn:hover { transform: translateY(-1px); background: color-mix(in srgb, var(--surface) 100%, var(--text) 6%); }
+}
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+.toggle[hidden] { display: none; }

@@ -11,6 +11,8 @@ const BARGE_MS = 300; // ...sustained for this long
 const FRAME_MS = 32; // Silero v5 frame: 512 samples @ 16 kHz
 const BARGE_FRAMES = Math.ceil(BARGE_MS / FRAME_MS);
 const FLAG_PLAYING = 1;
+// iOS (iPadOS reports itself as a Mac): stricter audio rules, no speaker-mode trick.
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
 let ws = null;
 let readyMsg = null; // "ready" of the open WebSocket (reused when voice starts after chatting)
@@ -41,6 +43,7 @@ let muted = false;
 let analyserOut = null; // bot voice
 let analyserIn = null; // user mic
 let micSource = null;
+let micStream = null;
 
 // ---------------------------------------------------------------- UI
 
@@ -169,8 +172,48 @@ function botActive() {
   return workletActive || replyStreaming || fallbackSpeaking || speechSynthesis.speaking || fallbackQueue.length > 0;
 }
 
-async function setupAudio() {
+// Called synchronously in the tap handler, before any await: iOS only lets audio start
+// (and keeps the speaker route) when the context is created and resumed inside the gesture.
+function unlockAudio() {
+  if (navigator.audioSession) navigator.audioSession.type = "play-and-record";
   ctx = new AudioContext({ sampleRate: ttsRate, latencyHint: "interactive" });
+  ctx.resume().catch(() => {});
+  ctx.onstatechange = onContextState;
+  if (IOS) {
+    // Unlock speechSynthesis (fallback voice) in the same gesture.
+    const u = new SpeechSynthesisUtterance(" ");
+    u.volume = 0;
+    speechSynthesis.speak(u);
+  }
+}
+
+// A phone call, Siri or another app took the audio: playback and mic stop until a tap.
+function onContextState() {
+  if (!running || !ctx) return;
+  $("resume").hidden = ctx.state === "running";
+}
+
+async function resumeAudio() {
+  $("resume").hidden = true;
+  try {
+    await ctx?.resume();
+    if (micStream?.getAudioTracks().some((t) => t.readyState === "ended") && vad) {
+      // The system killed the mic: let vad-web reacquire it through getStream.
+      await vad.pause();
+      await vad.start();
+    }
+  } catch (e) {
+    console.warn(e);
+  }
+  onContextState();
+}
+
+async function setupAudio() {
+  if (ctx.sampleRate !== ttsRate) {
+    // The server's TTS rate differs from the one guessed in the tap: rebuild (desktop only, no gesture needed).
+    await ctx.close().catch(() => {});
+    unlockAudio();
+  }
   await ctx.resume();
   await ctx.audioWorklet.addModule("player-worklet.js");
   player = new AudioWorkletNode(ctx, "pcm-player", { outputChannelCount: [1] });
@@ -226,7 +269,8 @@ function flushPlayback() {
 function pausePlayback() {
   bargePaused = true;
   player?.port.postMessage({ type: "pause" });
-  if (speechSynthesis.speaking) speechSynthesis.pause();
+  // iOS cannot reliably resume a paused utterance: drop the fallback sentence instead.
+  if (speechSynthesis.speaking) IOS ? speechSynthesis.cancel() : speechSynthesis.pause();
   setState("user-speaking", "Ti ascolto…");
 }
 
@@ -459,6 +503,7 @@ function sendUtterance(f32) {
 async function setupVad() {
   vad = await window.vad.MicVAD.new({
     model: "v5",
+    audioContext: ctx, // one context for mic and playback (vad-web resamples to 16 kHz)
     baseAssetPath: VENDOR,
     onnxWASMBasePath: VENDOR,
     positiveSpeechThreshold: 0.5,
@@ -471,6 +516,8 @@ async function setupVad() {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
+      micStream = stream;
+      stream.getAudioTracks().forEach((t) => (t.onended = () => onContextState()));
       // Tap the mic for the orb (not routed to the speakers).
       micSource?.disconnect();
       micSource = ctx.createMediaStreamSource(stream);
@@ -478,6 +525,15 @@ async function setupVad() {
       analyserIn.fftSize = 512;
       analyserIn.smoothingTimeConstant = 0.5;
       micSource.connect(analyserIn);
+      return stream;
+    },
+    // Mute = disable the track, keep the stream: no new permission prompt on iOS, the orb's
+    // analyser stays attached. A track the system ended is reacquired through getStream.
+    pauseStream: async (stream) => stream.getAudioTracks().forEach((t) => (t.enabled = false)),
+    resumeStream: async (stream) => {
+      const live = stream?.getAudioTracks().filter((t) => t.readyState === "live") ?? [];
+      if (!live.length) return vad.options.getStream();
+      live.forEach((t) => (t.enabled = true));
       return stream;
     },
     onFrameProcessed: (p) => {
@@ -533,6 +589,7 @@ async function start() {
   if (ws?.readyState !== WebSocket.OPEN) resetClientState();
   setState("thinking", "Avvio…");
   try {
+    unlockAudio();
     const ready = await ensureConnected();
     ttsRate = ready.tts_rate;
     await setupAudio();
@@ -558,7 +615,8 @@ async function start() {
 // Voice only: the WebSocket stays open, so the conversation goes on in the chat.
 async function teardown() {
   const [v, c] = [vad, ctx];
-  vad = ctx = player = mediaDest = analyserOut = analyserIn = micSource = null;
+  vad = ctx = player = mediaDest = analyserOut = analyserIn = micSource = micStream = null;
+  $("resume").hidden = true;
   try { await v?.destroy(); } catch {}
   await c?.close().catch(() => {});
   resetClientState();
@@ -681,6 +739,8 @@ $("reset").addEventListener("click", () => {
   if (ws?.readyState !== WebSocket.OPEN) $("log").innerHTML = "";
 });
 $("aec-route").addEventListener("change", routeAudio);
+$("resume").addEventListener("click", resumeAudio);
+if (IOS) $("aec-route").closest("label").hidden = true; // iOS: always the built-in echo cancellation
 speechSynthesis.getVoices();
 fitChatInput();
 refreshState();
