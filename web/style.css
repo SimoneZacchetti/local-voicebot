@@ -226,6 +226,9 @@ body.muted #mute .mic-off { display: block; }
 @media (max-width: 560px) {
   .captions { bottom: 0; }
   .round-btn { width: 56px; height: 56px; }
+  /* Narrow screens: room for the whole sentence being spoken, no preview of the next one. */
+  .cap-bot { font-size: 17px; -webkit-line-clamp: 5; }
+  .cap-bot .next { display: none; }
 }
 @media (hover: hover) {
   .icon-btn:hover { background: var(--surface); color: var(--text); }

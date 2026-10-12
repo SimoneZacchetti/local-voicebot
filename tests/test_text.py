@@ -175,3 +175,20 @@ def test_chunker_sentence_final_common_words_and_elision():
 def test_chunker_newline_list_items():
     out = chunk_stream("Ecco tre idee per te oggi:\nvisitare Siena\nandare al mare\n")
     assert out == ["Ecco tre idee per te oggi:", "visitare Siena", "andare al mare"]
+
+
+def test_language_question_or_negation_is_not_a_request():
+    lid = LangId()
+    assert lid.requested("Perché mi parli in inglese?") is None
+    assert lid.requested("non parlarmi in inglese") is None
+    assert lid.requested("why do you speak English") is None
+    assert lid.requested("No, no, parlami in italiano.") == "it"
+    assert lid.requested("Can you speak English please") == "en"
+
+
+def test_foreign_text_while_italian_is_echo_candidate():
+    lid = LangId()
+    for echo in ["String.", "And look at it.", "Thank you."]:
+        assert lid.foreign(echo, "it"), echo
+    for real in ["va bene", "e poi?", "stop", "ok", "aspetta un attimo", "spegni tutto", "parliamo in inglese"]:
+        assert not lid.foreign(real, "it"), real

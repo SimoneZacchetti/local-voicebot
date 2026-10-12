@@ -6,13 +6,15 @@ import { VoiceOrb } from "./viz.js";
 const $ = (id) => document.getElementById(id);
 
 const VENDOR = new URL("vendor/", location.href).href;
-const BARGE_PROB = 0.7; // speech probability needed to interrupt the bot
-const BARGE_MS = 300; // ...sustained for this long
+// iOS (iPadOS reports itself as a Mac): stricter audio rules, no speaker-mode trick.
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+// The phone's loudspeaker sits next to its mic and some of the bot's voice leaks past echo
+// cancellation: on iOS, interrupting the bot needs clearer and longer speech.
+const BARGE_PROB = IOS ? 0.85 : 0.7; // speech probability needed to interrupt the bot
+const BARGE_MS = IOS ? 500 : 300; // ...sustained for this long
 const FRAME_MS = 32; // Silero v5 frame: 512 samples @ 16 kHz
 const BARGE_FRAMES = Math.ceil(BARGE_MS / FRAME_MS);
 const FLAG_PLAYING = 1;
-// iOS (iPadOS reports itself as a Mac): stricter audio rules, no speaker-mode trick.
-const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
 let ws = null;
 let readyMsg = null; // "ready" of the open WebSocket (reused when voice starts after chatting)
@@ -106,7 +108,7 @@ function renderCaption() {
   const next = heard.turn === currentTurn && heard.seq >= 0 ? t.sentences[i + 1] || "" : "";
   const spoken = heard.turn === currentTurn && heard.seq >= 0;
   el.innerHTML = spoken
-    ? `${esc(now)}${next ? ` <span class="pending">${esc(next)}</span>` : ""}`
+    ? `${esc(now)}${next ? ` <span class="pending next">${esc(next)}</span>` : ""}`
     : `<span class="pending">${esc(now)}</span>`;
 }
 

@@ -165,6 +165,18 @@ def test_echo_skip(client):
         assert msgs[-1]["reason"] == "echo"
 
 
+def test_foreign_language_while_playing_is_echo(client):
+    """The bot's Italian voice coming back through the phone speaker as English words."""
+    UTTERANCES[20800] = "And look at it."
+    with client.websocket_connect("/ws") as ws:
+        recv(ws)
+        ws.send_bytes(utt(1, 8000))
+        msgs = recv_until(ws, lambda m: m["type"] == "audio" and m["seq"] == 1)
+        ws.send_bytes(utt(2, 20800, msgs[0]["turn"], 1, playing=True))
+        msgs = recv_until(ws, lambda m: m["type"] == "skip")
+        assert msgs[-1]["reason"] == "echo"
+
+
 def test_barge_in_truncates_history_to_heard(client, monkeypatch):
     monkeypatch.setattr(cfg, "continuation_s", -60.0)  # disable: fake utterances "start" in the past
     with client.websocket_connect("/ws") as ws:

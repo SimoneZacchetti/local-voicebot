@@ -35,9 +35,37 @@ class LangId:
         }
 
     def requested(self, text: str) -> str | None:
-        """Language explicitly asked for ("parliamo in inglese", "speak French", "auf Deutsch")."""
-        m = _REQUEST.search(text.lower())
-        return _NAME_TO_LANG[m.group("name")] if m else None
+        """Language explicitly asked for ("parliamo in inglese", "speak French", "auf Deutsch").
+
+        Not a request: a question about it ("perché mi parli in inglese?") or a negation
+        ("non parlarmi in inglese"), judged on the few words before the verb in the same clause.
+        """
+        low = text.lower()
+        m = _REQUEST.search(low)
+        if not m:
+            return None
+        clause = re.split(r"[,.;:!?]", low[: m.start()])[-1].split()[-3:]
+        if any(w in _NOT_A_REQUEST for w in clause):
+            return None
+        return _NAME_TO_LANG[m.group("name")]
+
+    def foreign(self, text: str, sticky: str, max_sticky: float = 0.1, ratio: float = 2.5) -> bool:
+        """``text`` is confidently in another language than ``sticky``, even when short.
+
+        While the bot talks, that is almost always its own voice coming back through the
+        speaker, mis-transcribed ("String.", "And look at it." during an Italian reply).
+        """
+        words = set(re.findall(r"\w+", text.lower()))
+        if not words or words & _BARGE_WORDS or self.requested(text):
+            return False
+        scores = self.scores(text)
+        if not scores:
+            return False
+        # Confidence is spread over ~25 languages, so short text never scores high: judge it
+        # relatively. "String." -> it 0.05, sv 0.21; "va bene" -> it 0.08, sl 0.09 (kept).
+        top, conf = max(scores.items(), key=lambda kv: kv[1])
+        mine = scores.get(sticky, 0.0)
+        return top != sticky and mine < max_sticky and conf >= ratio * mine
 
     def resolve(self, text: str, sticky: str, stt_lang: str | None = None) -> str:
         words = len(text.split())
@@ -121,6 +149,13 @@ _VERBS = (
     "fala|falar|falemos|responda|"
     "spreek|spreken|antwoord"
 )
+# Words before the verb that make it a question or a negation, not a request.
+_NOT_A_REQUEST = {
+    "perché", "perche", "why", "pourquoi", "warum", "porque", "qué", "waarom",
+    "non", "not", "don't", "dont", "nicht", "ne", "no", "niet",
+}
+# Short interjections that interrupt the bot in any language: never treated as echo.
+_BARGE_WORDS = {"stop", "ok", "okay", "basta", "aspetta", "wait", "no", "sì", "si", "yes", "ciao", "hey", "ehi"}
 _REQUEST = re.compile(
     rf"\b(?:{_VERBS})(?:(?:\s+\S+){{0,3}}?\s+(?:in|en|auf|em|na|in het)\s+|\s+)(?P<name>{_NAMES})\b"
 )

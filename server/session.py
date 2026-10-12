@@ -273,6 +273,8 @@ class Session:
                 reason = "hallucination"
             elif playing and self.current and is_echo(text, self._heard_sentences(heard_turn, heard_seq)):
                 reason = "echo"
+            elif playing and self.svc.langid.foreign(text, self.lang):
+                reason = "echo"  # the bot's own voice, mis-transcribed in another language
             if reason:
                 log.info("skip utt=%d reason=%s text=%r", utt_id, reason, text)
                 return self.send({"type": "skip", "utt_id": utt_id, "reason": reason, "text": text})
