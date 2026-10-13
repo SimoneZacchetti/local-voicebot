@@ -8,17 +8,19 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, Query, WebSocket
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import router as api_router
 from .auth import RemoteGate
 from .config import cfg
 from .langid import LangId
-from .phone import PhoneSessions
 from .llm import LlmRouter
+from .phone import PhoneSessions
 from .prompts import set_home_context
 from .session import Services, Session
+from .stats import SOURCES, Stats
 from .stt import SttRouter
 from .tools import ToolRegistry
 from .tts import PocketTts
@@ -29,7 +31,8 @@ for noisy in ("httpx", "pocket_tts", "root", "huggingface_hub"):
 log = logging.getLogger("voicebot")
 log.setLevel(logging.INFO)
 
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+ROOT = Path(__file__).resolve().parent.parent
+WEB_DIR = ROOT / "web"
 
 
 def build_services() -> Services:
@@ -38,7 +41,9 @@ def build_services() -> Services:
         from .ha import HomeAssistant
 
         ha = HomeAssistant()
-    return Services(stt=SttRouter(), llm=LlmRouter(), tts=PocketTts(), langid=LangId(), tools=ToolRegistry(ha))
+    stats = Stats(ROOT / cfg.stats_db, cfg.stats_retention_days) if cfg.stats_enabled else None
+    return Services(stt=SttRouter(), llm=LlmRouter(), tts=PocketTts(), langid=LangId(), tools=ToolRegistry(ha),
+                    stats=stats)
 
 
 async def start_tools(svc: Services) -> bool:
@@ -91,6 +96,8 @@ async def lifespan(app: FastAPI):
     yield
     if retry:
         retry.cancel()
+    if app.state.svc.stats is not None:
+        app.state.svc.stats.flush()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -109,5 +116,20 @@ async def healthz() -> dict:
     return {"ok": True}
 
 
-# Mounted last so it does not shadow /ws, /healthz and any /api route declared above.
+@app.get("/stats")
+async def stats_page() -> FileResponse:
+    return FileResponse(WEB_DIR / "stats.html")
+
+
+@app.get("/stats.json")
+async def stats_data(hours: float = Query(24, gt=0, le=24 * 366), source: str | None = None) -> dict:
+    stats = app.state.svc.stats
+    if stats is None:
+        return {"enabled": False}
+    if source not in (None, *SOURCES):
+        source = None
+    return {"enabled": True, **await asyncio.to_thread(stats.summary, hours, source)}
+
+
+# Mounted last so it does not shadow /ws, /healthz, /stats and any /api route declared above.
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

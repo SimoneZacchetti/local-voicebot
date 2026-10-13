@@ -167,5 +167,10 @@ class Config:
     api_confirm_ttl_s: float = field(default_factory=lambda: _env_float("API_CONFIRM_TTL_S", 60.0))
     api_confirm_pin: str = field(default_factory=lambda: _env("API_CONFIRM_PIN", ""))
 
+    # Per-turn latency log behind the /stats page (SQLite; data/ is git-ignored)
+    stats_enabled: bool = field(default_factory=lambda: _env_bool("STATS_ENABLED", True))
+    stats_db: str = field(default_factory=lambda: _env("STATS_DB", "data/stats.db"))
+    stats_retention_days: float = field(default_factory=lambda: _env_float("STATS_RETENTION_DAYS", 90.0))
+
 
 cfg = Config()

@@ -17,7 +17,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from server.config import POCKET_LANG_NAMES, cfg  # noqa: E402
+from server.config import POCKET_LANG_NAMES, cfg
 
 OK, FAIL, WARN = "\033[32mOK\033[0m", "\033[31mFAIL\033[0m", "\033[33mWARN\033[0m"
 failures = 0

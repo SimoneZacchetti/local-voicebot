@@ -2,8 +2,9 @@
 
 # 🎙️ Local Voicebot
 
-**Assistente vocale voce-a-voce, 100% locale su Apple Silicon. Gratis, veloce, interrompibile.**
+**Voice-to-voice assistant that runs 100% locally on Apple Silicon. Free, fast, interruptible.**
 
+[![CI](https://github.com/SimoneZacchetti/local-voicebot/actions/workflows/ci.yml/badge.svg)](https://github.com/SimoneZacchetti/local-voicebot/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-WebSocket-009688?logo=fastapi&logoColor=white)
 ![MLX](https://img.shields.io/badge/Apple%20Silicon-MLX-000000?logo=apple&logoColor=white)
@@ -12,53 +13,60 @@
 
 </div>
 
-Parli, lui risponde a voce nella tua lingua in **~0,5 s**. Puoi interromperlo in qualsiasi momento, scrivergli in chat e, se vuoi, fargli comandare la casa.
+You speak, it answers out loud in your language in **~0.5 s**. You can interrupt it at any time, type to it in a chat, and, if you want, let it control your home.
 
 ```
 Browser                               Server (localhost)
-mic → Silero VAD ──── PCM16 ────►  Parakeet STT → lingua → Qwen 3.6 (Ollama)
-player ◄────────────── PCM16 ────  frasi → Pocket TTS (streaming)
+mic → Silero VAD ──── PCM16 ────►  Parakeet STT → language → Qwen 3.6 (Ollama)
+player ◄────────────── PCM16 ────  sentences → Pocket TTS (streaming)
 ```
 
-## ✨ Funzioni
+## ✨ Features
 
-- 🗣️ **Voce-a-voce in streaming**: STT ~70 ms, primo audio in ~0,4–0,8 s
-- ✋ **Barge-in**: parlagli sopra e si ferma, ricordando solo ciò che hai sentito
-- 🌍 **7 lingue con voce locale** (it, en, fr, de, es, pt, nl), rilevamento automatico
-- 💬 **Chat scritta** nella stessa conversazione della voce
-- 🏠 **Smart home** via Home Assistant MCP, con conferma vocale per serrature e allarmi
-- 🌐 **Anche fuori casa** via Google Assistant, o Tailscale se Home Assistant resta a casa
-- 📱 **Dall'iPhone**: app sulla Home, Siri e widget, via Tailscale ([docs/IPHONE.md](docs/IPHONE.md))
-- ☁️ **Groq opzionale** (free tier) con fallback automatico ai modelli locali
+- 🗣️ **Streaming voice-to-voice**: STT in ~70 ms, first audio in ~0.4–0.8 s
+- ✋ **Barge-in**: talk over it and it stops, remembering only what you actually heard
+- 🌍 **7 languages with a local voice** (it, en, fr, de, es, pt, nl), detected automatically
+- 💬 **Text chat** in the same conversation as the voice
+- 🏠 **Smart home** via Home Assistant MCP, with spoken confirmation for locks and alarms
+- 🌐 **Away from home too** via Google Assistant, or Tailscale if Home Assistant stays at home
+- 📱 **From your iPhone**: home-screen app, Siri and widgets, via Tailscale ([docs/IPHONE.md](docs/IPHONE.md))
+- 📊 **Latency at a glance**: `/stats` page with p50/p95 for every stage ([docs/GUIDA.md](docs/GUIDA.md#latenza-stats))
+- ☁️ **Optional Groq** (free tier) with automatic fallback to the local models
 
-## 🚀 Avvio rapido
+## 🚀 Quick start
 
-Requisiti: Mac Apple Silicon (≥ 32 GB RAM), [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com), Chrome.
+Requirements: Apple Silicon Mac (≥ 32 GB RAM), [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com), Chrome.
 
 ```bash
 ollama pull qwen3.6:35b-a3b-nvfp4
 uv sync
-cp .env.example .env                      # opzionale: ogni valore ha un default
-uv run python scripts/check_env.py        # verifica setup e scarica i modelli
+cp .env.example .env                      # optional: every value has a default
+uv run python scripts/check_env.py        # checks the setup and downloads the models
 uv run uvicorn server.main:app --host 127.0.0.1 --port 8000
 ```
 
-Apri <http://localhost:8000> e premi **Inizia a parlare**.
+Open <http://localhost:8000> and press **Inizia a parlare** ("Start talking").
 
-## 🧪 Test
+## 🧪 Tests
 
 ```bash
+uv run ruff check .
 uv run pytest
 ```
 
-## 📚 Approfondimenti
+Both run in GitHub Actions on every pull request and every push to `main`.
 
-Setup di Home Assistant, Groq, configurazione completa, script E2E e struttura del codice: **[docs/GUIDA.md](docs/GUIDA.md)**.
+## 📚 Further reading
 
-## 🔒 Sicurezza
+The detailed guides are in Italian:
 
-I segreti (`GROQ_API_KEY`, `HA_TOKEN`) vivono solo in `.env`, che è escluso da git. Il server ascolta solo su `127.0.0.1`; dal telefono si raggiunge esclusivamente via `tailscale serve` con login e token ([docs/IPHONE.md](docs/IPHONE.md#4-sicurezza)). Mai funnel, mai `0.0.0.0`.
+- **[docs/GUIDA.md](docs/GUIDA.md)**: Home Assistant and Groq setup, full configuration, E2E scripts, code layout
+- **[docs/IPHONE.md](docs/IPHONE.md)**: iPhone app, Siri Shortcuts, widgets, security, troubleshooting
 
-## 📄 Licenze
+## 🔒 Security
 
-Parakeet (CC-BY-4.0), Kyutai Pocket TTS (MIT / CC-BY-4.0), Silero VAD e onnxruntime-web (MIT). Dettagli in [docs/GUIDA.md](docs/GUIDA.md#licenze-e-attribuzioni).
+Secrets (`GROQ_API_KEY`, `HA_TOKEN`, `API_TOKENS`) live only in `.env`, which git ignores. The server listens only on `127.0.0.1`. The phone reaches it only through `tailscale serve`, with a Tailscale login check and per-device tokens ([docs/IPHONE.md](docs/IPHONE.md#4-sicurezza)). Never use `tailscale funnel`, never bind to `0.0.0.0`.
+
+## 📄 Licenses
+
+Parakeet (CC-BY-4.0), Kyutai Pocket TTS (MIT / CC-BY-4.0), Silero VAD and onnxruntime-web (MIT). Details in [docs/GUIDA.md](docs/GUIDA.md#licenze-e-attribuzioni).

@@ -275,7 +275,7 @@ def test_tool_runs_once_and_reply_is_spoken(home):
         ws.send_bytes(utt(1, 12000))
         msgs = recv_until(ws, lambda m: m["type"] == "turn_end")
         assert home.home.calls == [("intent__HassTurnOff", {"name": "Luce cucina"})]
-        assert [m for m in msgs if m["type"] == "tool"][0]["calls"][0]["name"] == "intent__HassTurnOff"
+        assert next(m for m in msgs if m["type"] == "tool")["calls"][0]["name"] == "intent__HassTurnOff"
         assert [m["text"] for m in msgs if m["type"] == "sentence"] == ["Fatto, luce spenta."]
         # The second LLM round saw the tool result; the system prompt carries the device index.
         assert home.llm.calls[1][-1]["role"] == "tool"
@@ -291,7 +291,7 @@ def test_risky_action_needs_spoken_yes(home):
         ws.send_bytes(utt(1, 12800))
         msgs = recv_until(ws, lambda m: m["type"] == "turn_end")
         assert home.home.calls == []
-        assert [m for m in msgs if m["type"] == "confirm"][0]["action"] == "Vuoi davvero sbloccare Porta di casa?"
+        assert next(m for m in msgs if m["type"] == "confirm")["action"] == "Vuoi davvero sbloccare Porta di casa?"
         assert [m["text"] for m in msgs if m["type"] == "sentence"] == ["Vuoi davvero sbloccare Porta di casa?"]
         n_llm = len(home.llm.calls)
         ws.send_bytes(utt(2, 13600, msgs[0]["turn"], 0))
