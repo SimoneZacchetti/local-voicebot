@@ -198,7 +198,7 @@ def check_remote() -> None:
         return report(OK, "remote access", "disabled (REMOTE_ENABLED=false)")
     root = Path(__file__).resolve().parent.parent
     env = root / ".env"
-    tracked = subprocess.run(["git", "ls-files", "--error-unmatch", ".env"], cwd=root, capture_output=True).returncode == 0
+    tracked = subprocess.run(["git", "ls-files", "--error-unmatch", ".env"], check=False, cwd=root, capture_output=True).returncode == 0
     report(FAIL if tracked else OK, ".env in git", "TRACKED: remove it from git now" if tracked else "not tracked")
     if env.exists():
         mode = env.stat().st_mode & 0o777
@@ -207,7 +207,7 @@ def check_remote() -> None:
     cli = tailscale_cli()
     if not cli:
         return report(WARN, "tailscale CLI", "not found: install Tailscale and enable the CLI")
-    out = subprocess.run([cli, "serve", "status", "--json"], capture_output=True, text=True, timeout=10)
+    out = subprocess.run([cli, "serve", "status", "--json"], check=False, capture_output=True, text=True, timeout=10)
     try:
         st = json.loads(out.stdout or "{}")
     except ValueError:

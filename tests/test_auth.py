@@ -35,9 +35,8 @@ def ws_url(host=HOST, port=8001):
 
 
 def refused(c, url, headers):
-    with pytest.raises(WebSocketDisconnect) as e:
-        with c.websocket_connect(url, headers=headers) as ws:
-            ws.receive_json()
+    with pytest.raises(WebSocketDisconnect) as e, c.websocket_connect(url, headers=headers) as ws:
+        ws.receive_json()
     return e.value.code
 
 
