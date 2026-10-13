@@ -4,6 +4,7 @@
 
 **Assistente vocale voce-a-voce, 100% locale su Apple Silicon. Gratis, veloce, interrompibile.**
 
+[![CI](https://github.com/SimoneZacchetti/local-voicebot/actions/workflows/ci.yml/badge.svg)](https://github.com/SimoneZacchetti/local-voicebot/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-WebSocket-009688?logo=fastapi&logoColor=white)
 ![MLX](https://img.shields.io/badge/Apple%20Silicon-MLX-000000?logo=apple&logoColor=white)
@@ -28,6 +29,7 @@ player ◄────────────── PCM16 ────  frasi �
 - 💬 **Chat scritta** nella stessa conversazione della voce
 - 🏠 **Smart home** via Home Assistant MCP, con conferma vocale per serrature e allarmi
 - 🌐 **Anche fuori casa** via Google Assistant, o Tailscale se Home Assistant resta a casa
+- 📊 **Latenza sotto controllo**: pagina `/stats` con p50/p95 di ogni fase ([docs/GUIDA.md](docs/GUIDA.md#latenza-stats))
 - ☁️ **Groq opzionale** (free tier) con fallback automatico ai modelli locali
 
 ## 🚀 Avvio rapido

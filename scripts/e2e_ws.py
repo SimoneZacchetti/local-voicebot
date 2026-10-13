@@ -20,7 +20,7 @@ from scipy.signal import resample_poly
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from server.session import AUDIO_HEADER, UTT_HEADER  # noqa: E402
+from server.session import AUDIO_HEADER, UTT_HEADER
 
 QUESTIONS = [
     ("italian", "giovanni", "Ciao! Mi consigli un posto carino da visitare in Toscana?"),
@@ -42,8 +42,8 @@ def synth(models: dict, lang: str, voice: str, text: str) -> np.ndarray:
 
 
 async def main(url: str) -> None:
-    from parakeet_mlx import from_pretrained
     import mlx.core as mx
+    from parakeet_mlx import from_pretrained
     from parakeet_mlx.audio import get_logmel
 
     stt = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")

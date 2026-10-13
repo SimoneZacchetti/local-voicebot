@@ -21,11 +21,11 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from server.config import cfg  # noqa: E402
-from server.ha import HomeAssistant  # noqa: E402
-from server.llm import to_ollama  # noqa: E402
-from server.prompts import build_messages, set_home_context  # noqa: E402
-from server.tools import ToolRegistry  # noqa: E402
+from server.config import cfg
+from server.ha import HomeAssistant
+from server.llm import to_ollama
+from server.prompts import build_messages, set_home_context
+from server.tools import ToolRegistry
 
 # (phrase, expected tool name suffix, or None = must answer with text and no tool)
 CASES = [
@@ -43,8 +43,12 @@ CASES = [
 QUALITY = ["Mi consigli un libro da leggere in vacanza?", "Spiegami in due frasi cos'è un buco nero."]
 
 
+async def ollama_stop(model: str) -> None:
+    await asyncio.to_thread(subprocess.run, ["ollama", "stop", model], check=False, capture_output=True)
+
+
 async def run_model(model: str, reg: ToolRegistry, reps: int) -> dict:
-    subprocess.run(["ollama", "stop", cfg.llm_model], capture_output=True)
+    await ollama_stop(cfg.llm_model)
     client = httpx.AsyncClient(base_url="http://localhost:11434", timeout=120)
 
     async def chat(text: str, tools: bool = True) -> tuple[str, list[str], float]:
@@ -99,7 +103,7 @@ async def run_model(model: str, reg: ToolRegistry, reps: int) -> dict:
     for q, a in zip(QUALITY, answers):
         print(f"   Q: {q}\n   A: {a[:300]}")
     await client.aclose()
-    subprocess.run(["ollama", "stop", model], capture_output=True)
+    await ollama_stop(model)
     return stats
 
 
@@ -114,7 +118,8 @@ async def main() -> None:
     for m in models:
         await run_model(m, reg, reps)
     # Reload the configured model so the running voicebot stays fast.
-    httpx.post("http://localhost:11434/api/generate", json={"model": cfg.llm_model, "prompt": "", "keep_alive": -1}, timeout=120)
+    async with httpx.AsyncClient(timeout=120) as client:
+        await client.post("http://localhost:11434/api/generate", json={"model": cfg.llm_model, "prompt": "", "keep_alive": -1})
 
 
 if __name__ == "__main__":

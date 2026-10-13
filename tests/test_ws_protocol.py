@@ -2,10 +2,7 @@
 
 import asyncio
 import json
-import struct
-import time
 
-import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -324,7 +321,7 @@ def test_typed_message_without_voice_is_text_only(client):
         recv(ws)
         ws.send_text(text_msg("  Ciao, mi racconti qualcosa\n di bello sulla Toscana?  "))
         msgs = recv_until(ws, lambda m: m["type"] == "turn_end")
-        tr = [m for m in msgs if m["type"] == "transcript"][0]
+        tr = next(m for m in msgs if m["type"] == "transcript")
         assert tr["text"] == UTTERANCES[8000]
         assert tr["stt"] == "typed" and tr["merged"] is False
         assert len([m for m in msgs if m["type"] == "sentence"]) == 3

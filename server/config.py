@@ -144,5 +144,10 @@ class Config:
     port: int = field(default_factory=lambda: _env_int("PORT", 8000))
     warmup: bool = field(default_factory=lambda: _env_bool("WARMUP", True))
 
+    # Per-turn latency log behind the /stats page (SQLite; data/ is git-ignored)
+    stats_enabled: bool = field(default_factory=lambda: _env_bool("STATS_ENABLED", True))
+    stats_db: str = field(default_factory=lambda: _env("STATS_DB", "data/stats.db"))
+    stats_retention_days: float = field(default_factory=lambda: _env_float("STATS_RETENTION_DAYS", 90.0))
+
 
 cfg = Config()

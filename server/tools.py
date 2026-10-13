@@ -210,7 +210,7 @@ _YES_CORE = {"si", "certo", "certamente", "conferma", "confermo", "vai", "ok", "
              "esatto", "yes", "yeah", "yep", "sure", "confirm", "oui", "ja", "sim", "bene", "do", "ahead"}
 _YES_FILLER = {"va", "pure", "grazie", "per", "favore", "please", "go", "it", "thanks", "si", "allora", "dai"}
 _NEG = {"no", "non", "not", "ma", "but", "aspetta", "wait", "annulla", "stop", "fermo", "ferma", "cancel",
-        "nope", "lascia", "ancora", "dont", "don", "never", "mai", "nein", "non", "pas"}
+        "nope", "lascia", "ancora", "dont", "don", "never", "mai", "nein", "pas"}
 
 
 def yes_no(text: str) -> bool | None:
@@ -394,7 +394,7 @@ async def probe(target: str, timeout: float = 0.8) -> bool:
     host, _, port = target.rpartition(":")
     try:
         _, w = await asyncio.wait_for(asyncio.open_connection(host, int(port)), timeout)
-    except (OSError, ValueError, asyncio.TimeoutError):
+    except (TimeoutError, OSError, ValueError):
         return False
     w.close()
     return True
