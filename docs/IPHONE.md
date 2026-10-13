@@ -1,174 +1,174 @@
-# Voicebot dall'iPhone
+# Voicebot from your iPhone
 
-Usa il voicebot dal telefono, a casa e fuori:
+Use the voicebot from your phone, at home and away:
 
-- **App "Casa"** sulla schermata Home: voce e chat, come sul Mac.
-- **Siri, widget, Centro di Controllo e tasto Azione**: un comando alla volta, anche a telefono bloccato.
+- **"Home" app** on the Home Screen: voice and chat, just like on the Mac.
+- **Siri, widgets, Control Center and the Action button**: one command at a time, even with the phone locked.
 
-Il Mac resta il "cervello": deve essere acceso e sveglio. Il telefono lo raggiunge attraverso **Tailscale**, una rete privata cifrata. Non ci sono porte aperte sul router e niente è esposto su internet.
+The Mac stays the "brain": it must be on and awake. The phone reaches it through **Tailscale**, an encrypted private network. No ports are opened on the router and nothing is exposed to the internet.
 
 ```
-iPhone ──Tailscale──► https://<mac>.<tailnet>.ts.net:9443 ──► Mac 127.0.0.1:8001 (porta "telefono")
-                                                              Mac 127.0.0.1:8000 (browser del Mac)
+iPhone ──Tailscale──► https://<mac>.<tailnet>.ts.net:9443 ──► Mac 127.0.0.1:8001 ("phone" port)
+                                                              Mac 127.0.0.1:8000 (Mac browser)
 ```
 
-## 1. Configurazione (una volta)
+## 1. Setup (one time)
 
 ### Tailscale
 
-1. **Mac**: installa la versione *Standalone* da <https://pkgs.tailscale.com/stable/#macos>, fai login e attiva la CLI (icona nella barra dei menu → *Settings* → *CLI integration*).
-2. **iPhone**: installa l'app [Tailscale](https://apps.apple.com/app/tailscale/id1470499037), fai login con **lo stesso account** e attiva **VPN On Demand**.
-3. Dai al Mac un nome neutro, solo dentro Tailscale. Il nome finisce nel registro pubblico dei certificati HTTPS. Il nome del Mac in macOS non cambia.
+1. **Mac**: install the *Standalone* version from <https://pkgs.tailscale.com/stable/#macos>, log in and enable the CLI (menu bar icon → *Settings* → *CLI integration*).
+2. **iPhone**: install the [Tailscale](https://apps.apple.com/app/tailscale/id1470499037) app, log in with **the same account** and turn on **VPN On Demand**.
+3. Give the Mac a neutral name, only inside Tailscale. The name ends up in the public HTTPS certificate log. The Mac's name in macOS does not change.
 
    ```bash
    tailscale set --hostname=voicebot-mac
    ```
 
-4. Nella [console DNS](https://login.tailscale.com/admin/dns) attiva **MagicDNS** e **HTTPS Certificates**.
+4. In the [DNS console](https://login.tailscale.com/admin/dns) enable **MagicDNS** and **HTTPS Certificates**.
 
 ### Server
 
-1. Genera un token per ogni dispositivo. Lo script stampa i token: copiali nel `.env` e non condividerli.
+1. Generate a token for each device. The script prints the tokens: copy them into `.env` and don't share them.
 
    ```bash
    uv run python scripts/gen_secrets.py iphone
    ```
 
-2. Nel `.env`:
+2. In `.env`:
 
    ```dotenv
    REMOTE_ENABLED=true
    REMOTE_PORT=8001
-   PUBLIC_HOST=voicebot-mac.tailXXXX.ts.net:9443   # nome da `tailscale status`; :9443 vedi sotto
-   TS_ALLOWED_LOGINS=tuo.account@gmail.com         # il login Tailscale ammesso
-   API_TOKENS=<token generato>
+   PUBLIC_HOST=voicebot-mac.tailXXXX.ts.net:9443   # name from `tailscale status`; for :9443 see below
+   TS_ALLOWED_LOGINS=tuo.account@gmail.com         # the allowed Tailscale login
+   API_TOKENS=<generated token>
    ```
 
-   Poi esegui `chmod 600 .env`.
+   Then run `chmod 600 .env`.
 
-3. Avvia il server con le due porte:
+3. Start the server with both ports:
 
    ```bash
    uv run python -m server
    ```
 
-4. Pubblica **solo** la porta per il telefono:
+4. Publish **only** the phone port:
 
    ```bash
    tailscale serve --bg --https=9443 8001
    ```
 
-   Si usa la 9443 perché sul Mac la 443 può essere occupata (per esempio da Traefik di Docker). Se la tua 443 è libera, usa `tailscale serve --bg 8001` e togli `:9443` da `PUBLIC_HOST`.
+   Port 9443 is used because 443 may already be taken on the Mac (for example by Docker's Traefik). If your 443 is free, use `tailscale serve --bg 8001` and remove `:9443` from `PUBLIC_HOST`.
 
-5. Lancia `uv run python scripts/check_env.py`. Deve risultare tutto `OK`: `.env` non tracciato e con permessi 600, `tailscale serve` che pubblica solo `127.0.0.1:8001`, funnel spento.
+5. Run `uv run python scripts/check_env.py`. Everything must be `OK`: `.env` untracked with 600 permissions, `tailscale serve` publishing only `127.0.0.1:8001`, funnel off.
 
-> **Mai** `tailscale funnel`, mai `HOST=0.0.0.0`, mai port forwarding sul router: il server comanda la casa.
+> **Never** `tailscale funnel`, never `HOST=0.0.0.0`, never port forwarding on the router: the server controls the house.
 
-## 2. App "Casa" (voce e chat)
+## 2. "Home" app (voice and chat)
 
-1. Apri Safari sull'iPhone e vai su `https://voicebot-mac.tailXXXX.ts.net:9443`.
-2. Tocca **Condividi** → **Aggiungi alla schermata Home**.
-3. Apri l'icona **Casa** e tocca **Inizia a parlare**. Concedi il microfono: in iOS l'app installata può chiederlo di nuovo a ogni apertura.
+1. Open Safari on the iPhone and go to `https://voicebot-mac.tailXXXX.ts.net:9443`.
+2. Tap **Share** → **Add to Home Screen**.
+3. Open the **Home** icon and tap **Start talking**. Allow the microphone: on iOS the installed app may ask again every time it opens.
 
-Cosa aspettarsi:
+What to expect:
 
-- **Voce**: funziona solo con l'app aperta e lo schermo acceso. Durante la conversazione lo schermo resta acceso da solo.
-- **Blocco schermo o cambio di rete**: l'app si riconnette da sola ("Riconnessione…"). Il bot ricorda la conversazione per 15 minuti (`CLIENT_HISTORY_TTL_S`).
-- **Chiamate e Siri**: interrompono l'audio. Compare **"tocca per riprendere"**.
-- **Chat**: l'icona del fumetto in alto apre la chat, che funziona senza microfono.
-- **Eco**: con l'altoparlante del telefono a volume alto parte della voce del bot può tornare nel microfono. Il bot la riconosce quasi sempre. Con AirPods o cuffie il problema sparisce.
-- **Mac spento o Tailscale disattivato**: l'app mostra "Mac non raggiungibile".
+- **Voice**: works only with the app open and the screen on. During a conversation the screen stays on by itself.
+- **Screen lock or network change**: the app reconnects by itself ("Reconnecting…"). The bot remembers the conversation for 15 minutes (`CLIENT_HISTORY_TTL_S`).
+- **Calls and Siri**: they interrupt the audio. **"Tap to resume"** appears.
+- **Chat**: the speech bubble icon at the top opens the chat, which works without the microphone.
+- **Echo**: with the phone speaker at high volume, part of the bot's voice can leak back into the microphone. The bot almost always recognizes it. With AirPods or headphones the problem goes away.
+- **Mac off or Tailscale disabled**: the app shows "Mac unreachable".
 
-## 3. Siri e Comandi Rapidi
+## 3. Siri and Shortcuts
 
-I comandi rapidi chiamano `POST /api/command`. Il bot esegue la richiesta con lo stesso modello, gli stessi strumenti e la stessa sicurezza della voce, e risponde con un testo che Siri legge ad alta voce.
+Shortcuts call `POST /api/command`. The bot runs the request with the same model, the same tools and the same safety as voice, and replies with text that Siri reads aloud.
 
-### "Assistente casa" (voce, a mani libere)
+### "Home assistant" (voice, hands-free)
 
-Nell'app **Comandi Rapidi** tocca **+** e aggiungi queste azioni:
+In the **Shortcuts** app tap **+** and add these actions:
 
-1. **Detta testo**: lingua *Italiano*, *Interrompi ascolto: Dopo una pausa*.
-2. **Ottieni contenuto dell'URL**:
+1. **Dictate Text**: language *Italian*, *Stop Listening: After Pause*.
+2. **Get Contents of URL**:
    - URL: `https://voicebot-mac.tailXXXX.ts.net:9443/api/command`
-   - Metodo: **POST**
-   - Intestazioni:
-     - `Authorization` = `Bearer <il tuo token>`
+   - Method: **POST**
+   - Headers:
+     - `Authorization` = `Bearer <your token>`
      - `Content-Type` = `application/json`
-   - Corpo della richiesta: **JSON**
-     - `text` (Testo) = variabile *Testo dettato*
-     - `session_id` (Testo) = `phone`
-3. **Ottieni valore del dizionario**: chiave `reply` da *Contenuto dell'URL*.
-4. **Pronuncia testo**: *Valore del dizionario*.
+   - Request Body: **JSON**
+     - `text` (Text) = *Dictated Text* variable
+     - `session_id` (Text) = `phone`
+3. **Get Dictionary Value**: key `reply` from *Contents of URL*.
+4. **Speak Text**: *Dictionary Value*.
 
-Chiamalo **"Assistente casa"**. Evita "Casa": si confonde con l'app Casa di Apple. Poi prova: *"Ehi Siri, Assistente casa"* → *"spegni la luce in cucina"*.
+Name it **"Home assistant"**. Avoid plain "Home": it gets confused with Apple's Home app. Then try it: *"Hey Siri, Home assistant"* → *"turn off the kitchen light"*.
 
-`session_id: "phone"` mantiene la conversazione per 10 minuti (`PHONE_SESSION_TTL_S`): dopo *"accendi la luce in cucina"*, *"e in camera?"* funziona.
+`session_id: "phone"` keeps the conversation for 10 minutes (`PHONE_SESSION_TTL_S`): after *"turn on the kitchen light"*, *"and in the bedroom?"* works.
 
-### "Scrivi a casa" (testo)
+### "Message home" (text)
 
-È uguale a "Assistente casa", ma al posto di **Detta testo** usa **Chiedi input** (tipo Testo). Serve per scrivere in silenzio.
+Same as "Home assistant", but use **Ask for Input** (type Text) instead of **Dictate Text**. Useful for typing silently.
 
-### Pulsanti fissi
+### Fixed buttons
 
-Un comando rapido senza dettatura, con `text` fisso, per esempio `spegni tutte le luci` o `accendi la TV del salotto`. Basta un tocco.
+A shortcut without dictation, with a fixed `text`, for example `turn off all the lights` or `turn on the living room TV`. One tap is enough.
 
-### Dove metterli
+### Where to put them
 
-- **Widget**: tieni premuto sulla schermata Home → **Modifica** → **Aggiungi widget** → **Comandi Rapidi**.
-- **Centro di Controllo** e **schermata di blocco** (iOS 18): **Modifica** → **Aggiungi un controllo** → **Comandi Rapidi** → scegli il comando.
-- **Tasto Azione** (iPhone 15 Pro e successivi): **Impostazioni** → **Tasto Azione** → **Comando rapido**.
+- **Widget**: long-press the Home Screen → **Edit** → **Add Widget** → **Shortcuts**.
+- **Control Center** and **Lock Screen** (iOS 18): **Edit** → **Add a Control** → **Shortcuts** → pick the shortcut.
+- **Action button** (iPhone 15 Pro and later): **Settings** → **Action Button** → **Shortcut**.
 
-### Risposte possibili
+### Possible responses
 
-| `status` | Significato |
+| `status` | Meaning |
 |---|---|
-| `done` | Fatto: `reply` è la risposta. Fuori casa, con i comandi via Google, `reply` dice "inviato". |
-| `running` | Il bot ci mette più di `API_TIMEOUT_S` (20 s). Il comando non viene annullato. |
-| `blocked` | Serrature, porte o allarmi: da Siri sono **bloccati di default**. Usa l'app. |
-| `needs_confirmation` | Solo con `API_ALLOW_RISKY=true`: serve una conferma (vedi sotto). |
-| `error` | Messaggio vuoto o errore del server. |
+| `done` | Done: `reply` is the answer. Away from home, with commands via Google, `reply` says "sent". |
+| `running` | The bot is taking longer than `API_TIMEOUT_S` (20 s). The command is not cancelled. |
+| `blocked` | Locks, doors or alarms: **blocked by default** from Siri. Use the app. |
+| `needs_confirmation` | Only with `API_ALLOW_RISKY=true`: a confirmation is required (see below). |
+| `error` | Empty message or server error. |
 
-Se il Mac non è raggiungibile, **Ottieni contenuto dell'URL** fallisce e Comandi Rapidi mostra un errore.
+If the Mac is unreachable, **Get Contents of URL** fails and Shortcuts shows an error.
 
-### Serrature e porte da Siri (sconsigliato)
+### Locks and doors from Siri (not recommended)
 
-Di default sono rifiutate. Per abilitarle:
+They are refused by default. To enable them:
 
-1. Nel `.env` imposta `API_ALLOW_RISKY=true` e un `API_CONFIRM_PIN=<pin>`.
-2. Nel comando rapido, dopo **Ottieni contenuto dell'URL** aggiungi:
-   1. **Se** `status` è `needs_confirmation`:
-      - **Pronuncia testo** `question`;
-      - **Scegli dal menu**: Sì / No;
-      - **Chiedi input** (PIN);
-      - **Ottieni contenuto dell'URL**: `POST /api/confirm` con JSON `{"session_id": "phone", "yes": true|false, "pin": "<input>"}` e le stesse intestazioni.
-   2. Hai **60 secondi** (`API_CONFIRM_TTL_S`). Una conferma scaduta risponde `expired` e non esegue nulla.
-   3. Un "sì" mandato come comando normale non conferma mai niente.
+1. In `.env` set `API_ALLOW_RISKY=true` and an `API_CONFIRM_PIN=<pin>`.
+2. In the shortcut, after **Get Contents of URL** add:
+   1. **If** `status` is `needs_confirmation`:
+      - **Speak Text** `question`;
+      - **Choose from Menu**: Yes / No;
+      - **Ask for Input** (PIN);
+      - **Get Contents of URL**: `POST /api/confirm` with JSON `{"session_id": "phone", "yes": true|false, "pin": "<input>"}` and the same headers.
+   2. You have **60 seconds** (`API_CONFIRM_TTL_S`). An expired confirmation returns `expired` and executes nothing.
+   3. A "yes" sent as a normal command never confirms anything.
 
-**Mai** collegare comandi per serrature, porte o allarmi alla schermata di blocco o al Centro di Controllo.
+**Never** attach lock, door or alarm shortcuts to the Lock Screen or Control Center.
 
-## 4. Sicurezza
+## 4. Security
 
-- **Chi può collegarsi**: solo i dispositivi della tua tailnet con un login in `TS_ALLOWED_LOGINS`. Tutti gli altri ricevono 403. Il login lo inserisce Tailscale e non si può falsificare dal telefono.
-- **Origine dell'app**: l'app web deve arrivare esattamente da `https://PUBLIC_HOST`. Siri invece usa il token.
-- **Token**: `API_TOKENS` contiene un token per dispositivo, così puoi revocarne uno solo.
-  - Il token è scritto in chiaro dentro il comando rapido e si sincronizza via iCloud: **non condividere** quel comando rapido.
-  - Il server non scrive mai i token nei log.
-- **Browser del Mac**: sulla porta locale `/ws` accetta solo le pagine di `127.0.0.1` e `localhost`, quindi un sito qualsiasi aperto in Chrome non può comandare la casa.
+- **Who can connect**: only devices on your tailnet with a login listed in `TS_ALLOWED_LOGINS`. Everyone else gets 403. The login is set by Tailscale and cannot be spoofed from the phone.
+- **App origin**: the web app must come exactly from `https://PUBLIC_HOST`. Siri uses the token instead.
+- **Tokens**: `API_TOKENS` holds one token per device, so you can revoke just one.
+  - The token is stored in plain text inside the shortcut and syncs via iCloud: **don't share** that shortcut.
+  - The server never writes tokens to the logs.
+- **Mac browser**: on the local port, `/ws` only accepts pages from `127.0.0.1` and `localhost`, so any random site open in Chrome cannot control the house.
 
-### Telefono perso
+### Lost phone
 
-1. Nella [console Tailscale](https://login.tailscale.com/admin/machines) rimuovi il dispositivo.
-2. Togli il suo token da `API_TOKENS` nel `.env` e riavvia il server.
+1. In the [Tailscale console](https://login.tailscale.com/admin/machines) remove the device.
+2. Remove its token from `API_TOKENS` in `.env` and restart the server.
 
-## 5. Problemi comuni
+## 5. Troubleshooting
 
-| Sintomo | Causa probabile | Cosa fare |
+| Symptom | Likely cause | What to do |
 |---|---|---|
-| "Mac non raggiungibile" | Mac in stop, server fermo o Tailscale spento | Sveglia il Mac, `uv run python -m server`, controlla Tailscale su Mac e iPhone. |
-| La pagina non si apre | `tailscale serve` non attivo | `tailscale serve status`. Se è vuoto, `tailscale serve --bg --https=9443 8001`. |
-| 403 | Login non ammesso o `PUBLIC_HOST` sbagliato | Confronta `TS_ALLOWED_LOGINS` e `PUBLIC_HOST` con `tailscale status`. Il log del server dice il motivo (`refused … login/host/origin`). |
-| Certificato non valido | La 443 del Mac è occupata da un altro programma | Usa `--https=9443` e `PUBLIC_HOST=…:9443`. |
-| Siri dice errore | Token sbagliato (401) o Mac irraggiungibile | Controlla l'intestazione `Authorization: Bearer …`. |
-| Prima risposta lenta | Dopo inattività, macOS ha spostato il modello sul disco | Il bot lo ricarica quando il telefono si collega. Liberare RAM (Docker, app pesanti) aiuta. |
-| Il bot si interrompe da solo | Eco dell'altoparlante | Abbassa il volume o usa le cuffie. |
-| Comandi di casa ignorati fuori casa | La rotta Google non è attiva | `HOME_ROUTE=auto` con `HOME_PROBE`, vedi [GUIDA.md](GUIDA.md). |
+| "Mac unreachable" | Mac asleep, server stopped or Tailscale off | Wake the Mac, `uv run python -m server`, check Tailscale on Mac and iPhone. |
+| The page won't open | `tailscale serve` not active | `tailscale serve status`. If empty, `tailscale serve --bg --https=9443 8001`. |
+| 403 | Login not allowed or wrong `PUBLIC_HOST` | Compare `TS_ALLOWED_LOGINS` and `PUBLIC_HOST` with `tailscale status`. The server log gives the reason (`refused … login/host/origin`). |
+| Invalid certificate | The Mac's 443 is taken by another program | Use `--https=9443` and `PUBLIC_HOST=…:9443`. |
+| Siri reports an error | Wrong token (401) or Mac unreachable | Check the `Authorization: Bearer …` header. |
+| Slow first reply | After inactivity, macOS moved the model to disk | The bot reloads it when the phone connects. Freeing RAM (Docker, heavy apps) helps. |
+| The bot interrupts itself | Speaker echo | Lower the volume or use headphones. |
+| Home commands ignored away from home | The Google route is not active | `HOME_ROUTE=auto` with `HOME_PROBE`, see [GUIDE.md](GUIDE.md#home-control-while-away-google-assistant). |

@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="dark light" />
-  <title>Voicebot · Latenza</title>
+  <title>Voicebot · Latency</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <style>
     :root {
@@ -69,41 +69,41 @@
 <body>
   <main>
     <header>
-      <h1>Latenza</h1>
+      <h1>Latency</h1>
       <div class="controls">
-        <select id="hours" aria-label="Periodo">
-          <option value="1">Ultima ora</option>
-          <option value="24" selected>Ultime 24 ore</option>
-          <option value="168">Ultimi 7 giorni</option>
-          <option value="720">Ultimi 30 giorni</option>
+        <select id="hours" aria-label="Period">
+          <option value="1">Last hour</option>
+          <option value="24" selected>Last 24 hours</option>
+          <option value="168">Last 7 days</option>
+          <option value="720">Last 30 days</option>
         </select>
-        <select id="source" aria-label="Origine">
-          <option value="">Tutte le origini</option>
-          <option value="voice">Voce</option>
+        <select id="source" aria-label="Source">
+          <option value="">All sources</option>
+          <option value="voice">Voice</option>
           <option value="chat">Chat</option>
         </select>
-        <button id="refresh">Aggiorna</button>
+        <button id="refresh">Refresh</button>
       </div>
     </header>
 
-    <div id="content"><p class="empty">Caricamento…</p></div>
+    <div id="content"><p class="empty">Loading…</p></div>
 
     <p class="muted" style="margin-top:32px">
-      Tempi in millisecondi dalla fine della frase (voce) o dall'invio (chat).
-      Il primo audio non include l'attesa del silenzio del VAD. <a href="./">Torna all'assistente</a>
+      Times in milliseconds from the end of the sentence (voice) or from sending (chat).
+      First audio excludes the VAD silence wait. <a href="./">Back to the assistant</a>
     </p>
   </main>
 
   <script>
     const LABELS = {
-      stt_ms: "Trascrizione (STT)",
-      llm_ttft_ms: "LLM, primo token",
-      llm_tool_call_ms: "LLM, chiamata tool",
-      llm_after_tools_ttft_ms: "LLM dopo i tool",
-      first_audio_ms: "Primo audio",
-      total_ms: "Turno completo",
+      stt_ms: "Transcription (STT)",
+      llm_ttft_ms: "LLM, first token",
+      llm_tool_call_ms: "LLM, tool call",
+      llm_after_tools_ttft_ms: "LLM after tools",
+      first_audio_ms: "First audio",
+      total_ms: "Full turn",
     };
-    const SOURCES = { voice: "Voce", chat: "Chat" };
+    const SOURCES = { voice: "Voice", chat: "Chat" };
     // Colour thresholds for time to first audio (target ~0.5 s).
     const SLOW_MS = 1000, BAD_MS = 2000;
 
@@ -117,19 +117,19 @@
     }
 
     function render(d) {
-      if (!d.enabled) return `<p class="empty">Statistiche disattivate (STATS_ENABLED=false).</p>`;
-      if (!d.turns) return `<p class="empty">Nessun turno nel periodo scelto.</p>`;
+      if (!d.enabled) return `<p class="empty">Stats disabled (STATS_ENABLED=false).</p>`;
+      if (!d.turns) return `<p class="empty">No turns in the selected period.</p>`;
       const fa = d.metrics.first_audio_ms;
       const parts = Object.entries(d.by_source).filter(([, n]) => n).map(([k, n]) => `${SOURCES[k] || k} ${n}`);
       let html = `<div class="tiles">
-        ${tile("Primo audio p50", ms(fa.p50), "ms", tone(fa.p50))}
-        ${tile("Primo audio p95", ms(fa.p95), "ms", tone(fa.p95))}
-        ${tile("Turni", d.turns, parts.join(" · ") || "–")}
-        ${tile("Con azioni in casa", d.with_actions, Object.entries(d.by_llm).map(([k, n]) => `${esc(k)} ${n}`).join(" · "))}
+        ${tile("First audio p50", ms(fa.p50), "ms", tone(fa.p50))}
+        ${tile("First audio p95", ms(fa.p95), "ms", tone(fa.p95))}
+        ${tile("Turns", d.turns, parts.join(" · ") || "–")}
+        ${tile("With home actions", d.with_actions, Object.entries(d.by_llm).map(([k, n]) => `${esc(k)} ${n}`).join(" · "))}
       </div>`;
 
-      html += `<h2>Fasi</h2><div class="scroll"><table>
-        <tr><th>Fase</th><th>Turni</th><th>p50</th><th>p95</th><th>Max</th></tr>`;
+      html += `<h2>Stages</h2><div class="scroll"><table>
+        <tr><th>Stage</th><th>Turns</th><th>p50</th><th>p95</th><th>Max</th></tr>`;
       for (const [key, m] of Object.entries(d.metrics)) {
         if (!m.n) continue;
         html += `<tr><td>${LABELS[key] || esc(key)}</td><td>${m.n}</td><td>${ms(m.p50)}</td><td>${ms(m.p95)}</td><td>${ms(m.max)}</td></tr>`;
@@ -138,8 +138,8 @@
 
       if (d.daily.length > 1) {
         const top = Math.max(...d.daily.map((x) => x.first_audio_ms.p95 || 0), 1);
-        html += `<h2>Primo audio per giorno</h2><div class="scroll"><table>
-          <tr><th>Giorno</th><th>Turni</th><th>p50</th><th>p95</th><th style="width:40%"></th></tr>`;
+        html += `<h2>First audio per day</h2><div class="scroll"><table>
+          <tr><th>Day</th><th>Turns</th><th>p50</th><th>p95</th><th style="width:40%"></th></tr>`;
         for (const day of [...d.daily].reverse()) {
           const m = day.first_audio_ms;
           const w = m.p95 ? Math.max(2, (m.p95 / top) * 100) : 0;
@@ -149,11 +149,11 @@
         html += `</table></div>`;
       }
 
-      html += `<h2>Ultimi turni</h2><div class="scroll"><table>
-        <tr><th>Ora</th><th>Origine</th><th>Lingua</th><th>LLM</th><th>STT</th><th>Primo token</th><th>Primo audio</th><th>Totale</th></tr>`;
+      html += `<h2>Latest turns</h2><div class="scroll"><table>
+        <tr><th>Time</th><th>Source</th><th>Language</th><th>LLM</th><th>STT</th><th>First token</th><th>First audio</th><th>Total</th></tr>`;
       for (const t of d.recent) {
         const m = t.metrics;
-        const when = new Date(t.ts * 1000).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+        const when = new Date(t.ts * 1000).toLocaleString(undefined, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
         html += `<tr><td>${when}${t.actions ? " 🏠" : ""}</td><td>${SOURCES[t.source] || esc(t.source)}</td><td>${esc(t.lang)}</td>
           <td>${esc(t.llm)}</td><td>${ms(m.stt_ms)}</td><td>${ms(m.llm_ttft_ms ?? m.llm_tool_call_ms)}</td>
           <td class="${tone(m.first_audio_ms)}">${ms(m.first_audio_ms)}</td><td>${ms(m.total_ms)}</td></tr>`;
@@ -169,7 +169,7 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         $("content").innerHTML = render(await res.json());
       } catch (e) {
-        $("content").innerHTML = `<p class="empty">Impossibile caricare le statistiche: ${esc(e.message)}</p>`;
+        $("content").innerHTML = `<p class="empty">Could not load stats: ${esc(e.message)}</p>`;
       }
     }
 

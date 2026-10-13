@@ -30,7 +30,7 @@ player ◄────────────── PCM16 ────  sentenc
 - 🏠 **Smart home** via Home Assistant MCP, with spoken confirmation for locks and alarms
 - 🌐 **Away from home too** via Google Assistant, or Tailscale if Home Assistant stays at home
 - 📱 **From your iPhone**: home-screen app, Siri and widgets, via Tailscale ([docs/IPHONE.md](docs/IPHONE.md))
-- 📊 **Latency at a glance**: `/stats` page with p50/p95 for every stage ([docs/GUIDA.md](docs/GUIDA.md#latenza-stats))
+- 📊 **Latency at a glance**: `/stats` page with p50/p95 for every stage ([docs/GUIDE.md](docs/GUIDE.md#latency-stats))
 - ☁️ **Optional Groq** (free tier) with automatic fallback to the local models
 
 ## 🚀 Quick start
@@ -45,7 +45,7 @@ uv run python scripts/check_env.py        # checks the setup and downloads the m
 uv run uvicorn server.main:app --host 127.0.0.1 --port 8000
 ```
 
-Open <http://localhost:8000> and press **Inizia a parlare** ("Start talking").
+Open <http://localhost:8000> and press **Start talking**.
 
 ## 🧪 Tests
 
@@ -58,15 +58,15 @@ Both run in GitHub Actions on every pull request and every push to `main`.
 
 ## 📚 Further reading
 
-The detailed guides are in Italian:
+Detailed guides:
 
-- **[docs/GUIDA.md](docs/GUIDA.md)**: Home Assistant and Groq setup, full configuration, E2E scripts, code layout
+- **[docs/GUIDE.md](docs/GUIDE.md)**: Home Assistant and Groq setup, full configuration, E2E scripts, code layout
 - **[docs/IPHONE.md](docs/IPHONE.md)**: iPhone app, Siri Shortcuts, widgets, security, troubleshooting
 
 ## 🔒 Security
 
-Secrets (`GROQ_API_KEY`, `HA_TOKEN`, `API_TOKENS`) live only in `.env`, which git ignores. The server listens only on `127.0.0.1`. The phone reaches it only through `tailscale serve`, with a Tailscale login check and per-device tokens ([docs/IPHONE.md](docs/IPHONE.md#4-sicurezza)). Never use `tailscale funnel`, never bind to `0.0.0.0`.
+Secrets (`GROQ_API_KEY`, `HA_TOKEN`, `API_TOKENS`) live only in `.env`, which git ignores. The server listens only on `127.0.0.1`. The phone reaches it only through `tailscale serve`, with a Tailscale login check and per-device tokens ([docs/IPHONE.md](docs/IPHONE.md#4-security)). Never use `tailscale funnel`, never bind to `0.0.0.0`.
 
 ## 📄 Licenses
 
-Parakeet (CC-BY-4.0), Kyutai Pocket TTS (MIT / CC-BY-4.0), Silero VAD and onnxruntime-web (MIT). Details in [docs/GUIDA.md](docs/GUIDA.md#licenze-e-attribuzioni).
+Parakeet (CC-BY-4.0), Kyutai Pocket TTS (MIT / CC-BY-4.0), Silero VAD and onnxruntime-web (MIT). Details in [docs/GUIDE.md](docs/GUIDE.md#licenses-and-attributions).

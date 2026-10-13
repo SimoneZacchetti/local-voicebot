@@ -20,8 +20,8 @@ from .session import HeadlessSession, Services, Turn
 
 DEFAULT_ID = "phone"
 MAX_SESSIONS = 8
-BLOCKED = "Per serrature, porte e allarmi usa l'app: da qui non posso confermarlo."
-EXPIRED = "Richiesta scaduta, ripeti il comando."
+BLOCKED = "For locks, doors and alarms use the app: I can't confirm that from here."
+EXPIRED = "Request expired, say the command again."
 
 
 @dataclass
@@ -104,7 +104,7 @@ class PhoneSessions:
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - logged by the session task callback
-            return {"status": "error", "reply": "Qualcosa è andato storto.", "session_id": sid}
+            return {"status": "error", "reply": "Something went wrong.", "session_id": sid}
         body = {
             "status": "done",
             "reply": " ".join(turn.sentences),

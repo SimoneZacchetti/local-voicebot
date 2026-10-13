@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -10,7 +10,7 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-title" content="Casa" />
+  <meta name="apple-mobile-web-app-title" content="Home" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#07080c" media="(prefers-color-scheme: dark)" />
   <meta name="theme-color" content="#f7f8fb" media="(prefers-color-scheme: light)" />
@@ -21,7 +21,7 @@
     <header class="topbar">
       <div class="brand"><span class="dot"></span>Voicebot</div>
       <div class="topbar-actions">
-        <button id="chat-btn" class="icon-btn" aria-label="Scrivi un messaggio" title="Scrivi">
+        <button id="chat-btn" class="icon-btn" aria-label="Write a message" title="Write">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" /></svg>
         </button>
         <button id="history-btn" class="icon-btn" aria-label="Cronologia" title="Cronologia">
@@ -31,36 +31,36 @@
     </header>
 
     <main class="stage">
-      <canvas id="viz" aria-label="Visualizzazione voce"></canvas>
+      <canvas id="viz" aria-label="Voice visualization"></canvas>
       <div class="captions" aria-live="polite">
         <p id="cap-user" class="cap-user"></p>
         <p id="cap-bot" class="cap-bot"></p>
       </div>
     </main>
 
-    <button id="resume" class="resume" hidden>Audio in pausa · tocca per riprendere</button>
+    <button id="resume" class="resume" hidden>Audio paused · tap to resume</button>
 
     <div id="confirm" class="confirm" hidden>
-      <button id="confirm-yes" class="pill yes">Sì</button>
+      <button id="confirm-yes" class="pill yes">Yes</button>
       <button id="confirm-no" class="pill">No</button>
     </div>
 
     <div class="status-row">
-      <span id="status" class="status">Premi per iniziare</span>
+      <span id="status" class="status">Press to start</span>
       <span id="latency" class="latency"></span>
     </div>
 
     <footer class="dock">
       <button id="start" class="start-btn">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
-        Inizia a parlare
+        Start talking
       </button>
       <div class="controls" hidden>
-        <button id="mute" class="round-btn" aria-label="Disattiva microfono" title="Microfono">
+        <button id="mute" class="round-btn" aria-label="Mute microphone" title="Microphone">
           <svg class="mic-on" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
           <svg class="mic-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 9.3V6a3 3 0 0 0-5.7-1.3M9 9v3a3 3 0 0 0 4.6 2.5M5 11a7 7 0 0 0 11.2 5.6M19 11a7 7 0 0 1-.5 2.6M12 18v3M3 3l18 18" /></svg>
         </button>
-        <button id="stop" class="round-btn end" aria-label="Termina" title="Termina">
+        <button id="stop" class="round-btn end" aria-label="End" title="End">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
       </div>
@@ -69,23 +69,23 @@
 
   <aside id="drawer" class="drawer" aria-hidden="true">
     <div class="drawer-head">
-      <h2>Conversazione</h2>
-      <button id="drawer-close" class="icon-btn" aria-label="Chiudi">
+      <h2>Conversation</h2>
+      <button id="drawer-close" class="icon-btn" aria-label="Close">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
       </button>
     </div>
     <section id="log" class="log"></section>
     <form id="chat" class="chat" autocomplete="off">
-      <textarea id="chat-input" rows="1" maxlength="2000" enterkeyhint="send" placeholder="Scrivi un messaggio…" aria-label="Messaggio"></textarea>
-      <button id="chat-send" class="send-btn" type="submit" aria-label="Invia" title="Invia">
+      <textarea id="chat-input" rows="1" maxlength="2000" enterkeyhint="send" placeholder="Write a message…" aria-label="Message"></textarea>
+      <button id="chat-send" class="send-btn" type="submit" aria-label="Send" title="Send">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
       </button>
     </form>
     <div class="drawer-foot">
-      <label class="toggle" title="Instrada l'audio del bot in un elemento &lt;audio&gt;: aiuta la cancellazione dell'eco con gli altoparlanti">
-        <input type="checkbox" id="aec-route" /> <span>Modalità altoparlanti</span>
+      <label class="toggle" title="Route the bot audio through an &lt;audio&gt; element: helps echo cancellation on speakers">
+        <input type="checkbox" id="aec-route" /> <span>Speaker mode</span>
       </label>
-      <button id="reset" class="text-btn">Nuova conversazione</button>
+      <button id="reset" class="text-btn">New conversation</button>
       <p id="providers" class="providers"></p>
     </div>
   </aside>

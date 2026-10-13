@@ -1,8 +1,8 @@
 {
   "name": "Voicebot",
-  "short_name": "Casa",
-  "description": "Assistente vocale e controllo della casa",
-  "lang": "it",
+  "short_name": "Home",
+  "description": "Voice assistant and home control",
+  "lang": "en",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

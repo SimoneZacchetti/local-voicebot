@@ -48,6 +48,6 @@ self.addEventListener("fetch", (e) => {
 function offline() {
   const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Voicebot</title><body style="font:17px -apple-system,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#07080c;color:#f2f4f8;text-align:center">
-<div><p style="font-size:20px;font-weight:600">Mac non raggiungibile</p><p style="opacity:.6">Controlla che il Mac sia acceso e che Tailscale sia attivo,<br>poi riapri l'app.</p></div>`;
+<div><p style="font-size:20px;font-weight:600">Mac unreachable</p><p style="opacity:.6">Check that the Mac is on and Tailscale is running,<br>then reopen the app.</p></div>`;
   return new Response(html, { status: 503, headers: { "content-type": "text/html; charset=utf-8" } });
 }

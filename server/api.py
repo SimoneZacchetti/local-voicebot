@@ -42,7 +42,7 @@ async def confirm(body: Confirm, request: Request):
 @router.get("/status")
 async def status(request: Request) -> dict:
     svc = request.app.state.svc
-    warnings = [] if svc.tools.enabled or cfg.home_backend != "ha" else ["Home Assistant non raggiungibile"]
+    warnings = [] if svc.tools.enabled or cfg.home_backend != "ha" else ["Home Assistant unreachable"]
     return {
         "route": svc.tools.mode,
         "home_tools": len(svc.tools.specs),

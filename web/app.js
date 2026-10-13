@@ -81,11 +81,11 @@ function setState(state, text) {
 const wsOpen = () => ws?.readyState === WebSocket.OPEN;
 
 function refreshState() {
-  if (!running) return setState("idle", starting ? "Avvio…" : "Premi per iniziare");
-  if (!wsOpen() && !starting) return setState("thinking", reconnectTries > 3 ? "Mac non raggiungibile" : "Riconnessione…");
-  if (botActive() && !bargePaused) return setState("speaking", "Tocca la sfera o parla per interrompere");
-  if (muted) return setState("listening", "Microfono disattivato");
-  setState("listening", "Ti ascolto");
+  if (!running) return setState("idle", starting ? "Starting…" : "Press to start");
+  if (!wsOpen() && !starting) return setState("thinking", reconnectTries > 3 ? "Mac unreachable" : "Reconnecting…");
+  if (botActive() && !bargePaused) return setState("speaking", "Tap the orb or speak to interrupt");
+  if (muted) return setState("listening", "Microphone muted");
+  setState("listening", "Listening");
 }
 
 // ---------------------------------------------------------------- orb + captions
@@ -299,7 +299,7 @@ function pausePlayback() {
   player?.port.postMessage({ type: "pause" });
   // iOS cannot reliably resume a paused utterance: drop the fallback sentence instead.
   if (speechSynthesis.speaking) IOS ? speechSynthesis.cancel() : speechSynthesis.pause();
-  setState("user-speaking", "Ti ascolto…");
+  setState("user-speaking", "Listening…");
 }
 
 function resumePlayback() {
@@ -353,8 +353,8 @@ function onFirstAudio(turn) {
   const end = speechEndAt.get(utt);
   if (end) {
     const ms = Math.round(t.firstAudio - end);
-    $("latency").textContent = `risposta in ${ms} ms`;
-    $("latency").title = `Dalla fine della frase al primo audio, più ${redemptionMs} ms di attesa del silenzio`;
+    $("latency").textContent = `replied in ${ms} ms`;
+    $("latency").title = `From the end of your sentence to the first audio, plus ${redemptionMs} ms of silence wait`;
   }
 }
 
@@ -380,13 +380,13 @@ function connect() {
         onAudio(e.data);
       }
     };
-    sock.onerror = () => reject(new Error("Mac non raggiungibile (acceso? Tailscale attivo?)"));
+    sock.onerror = () => reject(new Error("Mac unreachable (is it on? is Tailscale running?)"));
     sock.onclose = () => {
-      reject(new Error("connessione chiusa dal server")); // no-op once resolved
+      reject(new Error("connection closed by the server")); // no-op once resolved
       if (ws !== sock) return; // closed by teardown
       ws = readyMsg = null;
       if (!running) {
-        if (opened) notice("Connessione persa con il server.");
+        if (opened) notice("Lost connection to the server.");
         return; // the chat reconnects on the next message
       }
       // Voice on: screen lock, Wi-Fi <-> cellular, Mac restarted... keep the mic and retry.
@@ -419,7 +419,7 @@ function onReconnected(ready) {
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
   if (running) ws.send(JSON.stringify({ type: "hello", greet: false }));
-  if (!ready.resumed && $("log").querySelector(".msg")) notice("Il server è ripartito: conversazione nuova.");
+  if (!ready.resumed && $("log").querySelector(".msg")) notice("The server restarted: new conversation.");
   refreshState();
 }
 
@@ -458,7 +458,7 @@ function onControl(m) {
   switch (m.type) {
     case "ready": {
       ttsRate = m.tts_rate;
-      if (m.resumed && !$("log").querySelector(".msg")) notice(`Conversazione ripresa (${m.resumed} messaggi)`);
+      if (m.resumed && !$("log").querySelector(".msg")) notice(`Conversation resumed (${m.resumed} messages)`);
       redemptionMs = m.vad?.redemption_ms ?? redemptionMs;
       const p = m.providers;
       $("providers").textContent = `STT ${p.stt} · LLM ${p.llm_model} (${p.llm}) · TTS ${p.tts}`;
@@ -477,7 +477,7 @@ function onControl(m) {
       heard = { turn: m.turn, seq: -1 };
       turnUtt.set(m.turn, m.utt_id);
       turnState(m.turn).lang = m.lang;
-      if (m.utt_id) setState("thinking", "Ci penso…");
+      if (m.utt_id) setState("thinking", "Thinking…");
       break;
     }
     case "transcript": {
@@ -539,7 +539,7 @@ function onControl(m) {
       if (m.turn !== currentTurn) break;
       const what = m.calls.map((c) => describeCall(c)).join(", ");
       addMsg("action", esc(`⚙ ${what}`));
-      setState("thinking", "Eseguo…");
+      setState("thinking", "Working on it…");
       break;
     }
     case "confirm":
@@ -547,12 +547,12 @@ function onControl(m) {
       $("status").textContent = m.action;
       break;
     case "error":
-      notice(m.fallback ? `${m.stage}: ${m.msg} → uso ${m.fallback}` : `Errore ${m.stage}: ${m.msg}`, true);
+      notice(m.fallback ? `${m.stage}: ${m.msg} → using ${m.fallback}` : `Error ${m.stage}: ${m.msg}`, true);
       break;
     case "reset_done":
       $("log").innerHTML = "";
       $("cap-user").textContent = $("cap-bot").textContent = "";
-      notice("Nuova conversazione");
+      notice("New conversation");
       break;
   }
 }
@@ -628,12 +628,12 @@ async function setupVad() {
     onSpeechStart: () => {
       ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "speech_start" }));
       activeAtSpeechStart = botActive() || bargePaused;
-      if (!activeAtSpeechStart) setState("user-speaking", "Ti ascolto…");
+      if (!activeAtSpeechStart) setState("user-speaking", "Listening…");
       if (!activeAtSpeechStart) $("cap-bot").textContent = "";
     },
     onSpeechEnd: (audio) => {
       sendUtterance(audio);
-      if (!botActive() || bargePaused) setState("thinking", "Ci penso…");
+      if (!botActive() || bargePaused) setState("thinking", "Thinking…");
     },
     onVADMisfire: () => {
       resumePlayback();
@@ -663,18 +663,18 @@ async function start() {
   $("start").disabled = true;
   // Chat already open: keep its WebSocket, server history and client turns.
   if (ws?.readyState !== WebSocket.OPEN) resetClientState();
-  setState("thinking", "Avvio…");
+  setState("thinking", "Starting…");
   try {
     unlockAudio();
     const ready = await ensureConnected();
     ttsRate = ready.tts_rate;
     await setupAudio();
     await setupVad();
-    if (ws.readyState !== WebSocket.OPEN) throw new Error("connessione chiusa dal server");
+    if (ws.readyState !== WebSocket.OPEN) throw new Error("connection closed by the server");
   } catch (err) {
     console.error(err);
     await teardown();
-    setState("idle", `Impossibile avviare: ${err.message || err}`);
+    setState("idle", `Could not start: ${err.message || err}`);
     return;
   } finally {
     starting = false;
@@ -719,7 +719,7 @@ async function stop() {
 async function setMuted(on) {
   muted = on;
   document.body.classList.toggle("muted", on);
-  $("mute").setAttribute("aria-label", on ? "Attiva microfono" : "Disattiva microfono");
+  $("mute").setAttribute("aria-label", on ? "Unmute microphone" : "Mute microphone");
   try {
     if (vad) await (on ? vad.pause() : vad.start());
   } catch (e) {
@@ -770,7 +770,7 @@ async function sendText(text) {
   try {
     await ensureConnected();
   } catch (err) {
-    notice(`Impossibile connettersi: ${err.message || err}`, true);
+    notice(`Could not connect: ${err.message || err}`, true);
     return false;
   }
   // What the user got of the current reply: heard (voice on) or read (text only).
@@ -778,7 +778,7 @@ async function sendText(text) {
   const seen = running ? (heard.turn === currentTurn ? heard.seq : -1) : (t ? t.sentences.length - 1 : -1);
   const playing = running && (botActive() || bargePaused);
   ws.send(JSON.stringify({ type: "text", text, heard_turn: currentTurn, heard_seq: seen, playing }));
-  if (running) setState("thinking", "Ci penso…");
+  if (running) setState("thinking", "Thinking…");
   return true;
 }
 
