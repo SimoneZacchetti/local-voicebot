@@ -13,9 +13,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from server.config import cfg  # noqa: E402
-from server.llm import OllamaLlm  # noqa: E402
-from server.prompts import build_messages  # noqa: E402
+from server.config import cfg
+from server.llm import OllamaLlm
+from server.prompts import build_messages
 
 QUESTIONS = [
     ("it", "Ciao! Mi consigli un posto carino da visitare in Toscana?"),

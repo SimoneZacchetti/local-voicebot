@@ -26,6 +26,7 @@ from .config import cfg
 from .langid import BCP47, LangId
 from .llm import LlmRouter
 from .prompts import CANCELLED, DONE, FAILED, GREETINGS, PARTIAL, build_messages, set_home_context
+from .stats import Stats
 from .stt import SAMPLE_RATE, SttRouter
 from .textclean import clean_for_tts, is_echo, is_hallucination
 from .tools import PendingAction, ToolCall, ToolRegistry, confirmation_question, new_pending, yes_no
@@ -47,6 +48,7 @@ class Services:
     tts: PocketTts
     langid: LangId
     tools: ToolRegistry = field(default_factory=ToolRegistry)
+    stats: Stats | None = None  # per-turn latency log for /stats (None: disabled)
 
 
 @dataclass
@@ -231,7 +233,7 @@ class Session:
                 return self.send({"type": "skip", "utt_id": utt_id, "reason": "short"})
             try:
                 tr = await self.svc.stt.transcribe(pcm)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 log.exception("STT failed")
                 self.send({"type": "error", "stage": "stt", "msg": str(e)})
                 return self.send({"type": "skip", "utt_id": utt_id, "reason": "stt_error"})
@@ -376,7 +378,6 @@ class Session:
             self.history, turn.lang, cfg.groq_history_turns if llm.using_remote else None, with_tools=tools.enabled
         )
         sentences: asyncio.Queue[str | None] = asyncio.Queue()
-        t_llm = time.perf_counter()
 
         fallbacks: list[str] = []
 
@@ -490,7 +491,12 @@ class Session:
                 turn.in_history = False
         turn.mark("total_ms")
         log.info("turn=%d lang=%s %s user=%r actions=%s", turn.id, turn.lang, turn.metrics, turn.user_text, turn.actions)
+        if self.svc.stats is not None and turn.user_text is not None:
+            self.svc.stats.record(self.source(turn), turn.lang, self.svc.llm.name, len(turn.actions), turn.metrics)
         self.send({"type": "turn_end", "turn": turn.id, "metrics": turn.metrics})
+
+    def source(self, turn: Turn) -> str:
+        return "voice" if turn.utt_id else "chat"
 
     # -- home actions -----------------------------------------------------------------------
 

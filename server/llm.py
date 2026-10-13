@@ -186,7 +186,7 @@ class LlmRouter:
                 produced = True
                 yield t
             return
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             if produced or not cfg.provider_fallback:
                 raise
             log.warning("LLM %s failed (%s), falling back to ollama", self.primary.name, e)

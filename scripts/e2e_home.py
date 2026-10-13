@@ -23,7 +23,7 @@ from scipy.signal import resample_poly
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from server.session import AUDIO_HEADER, UTT_HEADER  # noqa: E402
+from server.session import AUDIO_HEADER, UTT_HEADER
 
 HA_URL = os.environ.get("HA_URL", "http://127.0.0.1:18123")
 HA = httpx.Client(base_url=HA_URL, headers={"Authorization": f"Bearer {os.environ['HA_TOKEN']}"})
@@ -70,8 +70,8 @@ SCENARIO = [
 
 
 async def main(url: str) -> int:
-    from parakeet_mlx import from_pretrained
     import mlx.core as mx
+    from parakeet_mlx import from_pretrained
     from parakeet_mlx.audio import get_logmel
     from pocket_tts import TTSModel
 

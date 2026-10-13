@@ -14,7 +14,7 @@ ABBREVIATIONS = {
     "dott", "dott.ssa", "sig", "sig.ra", "sigg", "prof", "prof.ssa", "ing", "avv", "arch",
     "ecc", "p.es", "cfr", "dr", "s.p.a", "s.r.l",
     # English
-    "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "vs", "etc", "e.g", "i.e", "approx",
+    "mr", "mrs", "ms", "sr", "jr", "vs", "etc", "e.g", "i.e", "approx",
     "inc", "ltd", "fig", "jan", "feb", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
 }
 # Also ordinary words ("no", "es", "mar"): abbreviations only when a number follows ("n. 5").
@@ -88,9 +88,9 @@ class Chunker:
                     # Too short: keep accumulating; merge with the next sentence.
                     continue
                 return end
-            if first and ch in _SOFT:
-                if i + 1 < len(buf) and buf[i + 1].isspace() and self._words(buf[:i]) >= self.first_min_words:
-                    return i + 1
+            if (first and ch in _SOFT and i + 1 < len(buf) and buf[i + 1].isspace()
+                    and self._words(buf[:i]) >= self.first_min_words):
+                return i + 1
 
         # Eager first chunk / hard limit: cut at the last whitespace.
         limit = self.first_max_chars if first else self.hard_max_chars

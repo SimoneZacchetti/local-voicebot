@@ -145,18 +145,28 @@ Tutte le chiavi sono in [.env.example](../.env.example). Le più utili:
 | `CONTINUATION_S` | `1.2` | finestra per unire una frase ripresa subito dopo l'inizio della risposta |
 | `DEFAULT_LANG` | `it` | lingua iniziale |
 | `VOICE_IT` … `VOICE_NL` | `giovanni`, `alba`, … | voci predefinite Pocket TTS |
+| `STATS_ENABLED` | `true` | registra i tempi di ogni turno per la pagina `/stats` (mai il testo detto o scritto) |
 | `STT_PROVIDER` | `parakeet` | `whisper-mlx` (richiede `uv sync --extra whisper`) per lingue extra-europee |
+
+## Latenza (`/stats`)
+
+<http://localhost:8000/stats> mostra p50 e p95 di ogni fase (STT, primo token dell'LLM, primo audio, turno completo), l'andamento per giorno e gli ultimi 20 turni. Si può filtrare per periodo e per origine (voce o chat). Il primo audio diventa arancione sopra 1 s e rosso sopra 2 s.
+
+I dati stanno in `data/stats.db` (SQLite, escluso da git) e i dati più vecchi di `STATS_RETENTION_DAYS` si cancellano all'avvio. Per ogni turno si salvano solo i tempi, la lingua, l'origine, il provider e il numero di azioni in casa, mai il testo. I dati grezzi sono su `/stats.json?hours=24&source=voice`.
 
 ## Test
 
 ```bash
-uv run pytest                                  # unit test + protocollo WebSocket con provider finti
+uv run ruff check .                            # lint (versione fissata nelle dipendenze dev)
+uv run pytest                                  # unit test + protocollo WebSocket con provider finti (gira anche in CI)
 uv run python scripts/bench_llm.py             # TTFT del modello
 uv run python scripts/e2e_ws.py                # E2E senza browser: voce sintetica → risposta → trascrizione
 uv run python scripts/e2e_browser.py           # E2E in Chrome con microfono finto (VAD reale)
 uv run python scripts/e2e_browser.py --barge   # come sopra, con interruzione e frase spezzata
 HA_TOKEN=... uv run python scripts/e2e_home.py # comandi vocali reali verso Home Assistant (server con HOME_BACKEND=ha)
 ```
+
+GitHub Actions ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) esegue `ruff check` e `pytest` su un runner macOS Apple Silicon a ogni pull request e a ogni push su `main`. Gli script E2E e i benchmark restano manuali: servono i modelli veri, il microfono e Home Assistant.
 
 ## Struttura
 
@@ -167,6 +177,7 @@ HA_TOKEN=... uv run python scripts/e2e_home.py # comandi vocali reali verso Home
 | [server/langid.py](../server/langid.py) | rilevamento lingua con isteresi |
 | [server/chunker.py](../server/chunker.py) | spezza lo stream dell'LLM in frasi pronunciabili (primo pezzo anticipato) |
 | [server/tools.py](../server/tools.py), [server/ha.py](../server/ha.py) | strumenti per la casa (MCP di Home Assistant), conferme per azioni rischiose |
+| [server/stats.py](../server/stats.py), [web/stats.html](../web/stats.html) | registro dei tempi per turno (SQLite) e pagina `/stats` |
 | [server/textclean.py](../server/textclean.py) | pulizia markdown/emoji, filtri allucinazioni ed eco |
 | [web/app.js](../web/app.js), [web/player-worklet.js](../web/player-worklet.js) | microfono, VAD, riproduzione senza buchi, interruzioni, chat scritta |
 

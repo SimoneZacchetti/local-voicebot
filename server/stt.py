@@ -168,7 +168,7 @@ class SttRouter:
             return await self.local.transcribe(pcm)
         try:
             return await self.primary.transcribe(pcm)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             if not cfg.provider_fallback:
                 raise
             log.warning("STT %s failed (%s), falling back to parakeet", self.primary.name, e)
