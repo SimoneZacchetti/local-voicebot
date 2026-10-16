@@ -35,17 +35,17 @@ player ◄────────────── PCM16 ────  sentenc
 
 ## 🚀 Quick start
 
-Requirements: Apple Silicon Mac (≥ 32 GB RAM), [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com), Chrome.
+Requirements: Apple Silicon Mac (≥ 32 GB RAM) and Chrome. Everything else is installed for you.
 
 ```bash
-ollama pull qwen3.6:35b-a3b-nvfp4
-uv sync
-cp .env.example .env                      # optional: every value has a default
-uv run python scripts/check_env.py        # checks the setup and downloads the models
-uv run uvicorn server.main:app --host 127.0.0.1 --port 8000
+git clone https://github.com/SimoneZacchetti/local-voicebot.git
+cd local-voicebot
+./start.sh
 ```
 
-Open <http://localhost:8000> and press **Start talking**.
+`start.sh` installs what is missing ([uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com), the Python dependencies), downloads the models (~27 GB, first run only), creates `.env` with working defaults, checks the setup, starts the server and opens <http://localhost:8000>. Press **Start talking**.
+
+Next runs take ~10 s: just run `./start.sh` again. `./start.sh --check` re-runs the setup check, `--no-open` skips the browser. Manual steps are in [docs/GUIDE.md](docs/GUIDE.md#installation).
 
 ## 🧪 Tests
 
