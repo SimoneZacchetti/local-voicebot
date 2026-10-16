@@ -112,8 +112,10 @@ _RISKY_WORDS = re.compile(
 )
 _RISKY_CLASSES = {"garage", "gate", "door"}
 # Domains where HA cannot match a lock/door/alarm: a call restricted to these is safe.
-_SAFE_DOMAINS = {"light", "fan", "media_player", "climate", "humidifier", "vacuum", "water_heater",
-                 "scene", "script", "input_boolean", "todo"}
+# Not scripts, scenes or automations: they can drive anything, so they are judged by name.
+_SAFE_DOMAINS = {"light", "fan", "media_player", "climate", "humidifier", "vacuum", "water_heater", "todo"}
+# Entities that may open or unlock something without being a lock: judged by name.
+_NAMED_DOMAINS = {"switch", "button", "cover", "input_boolean", "script", "scene", "automation"}
 _DEVICE_INTENTS = {"HassTurnOn", "HassTurnOff", "HassSetPosition"}
 
 # What an intent actually does, per domain. Note HA's lock semantics: TurnOn = lock, TurnOff = unlock.
@@ -127,6 +129,9 @@ _VERBS = {
     ("valve", "HassTurnOff"): ("chiudere", "close"),
     ("alarm_control_panel", "HassTurnOn"): ("attivare", "arm"),
     ("alarm_control_panel", "HassTurnOff"): ("disattivare", "disarm"),
+    ("script", "HassTurnOn"): ("avviare", "run"),
+    ("scene", "HassTurnOn"): ("attivare", "activate"),
+    ("automation", "HassTurnOn"): ("attivare", "turn on"),
     # Unknown target: name every effect the call could have.
     (None, "HassTurnOn"): ("accendere, aprire o chiudere a chiave", "turn on, open or lock"),
     (None, "HassTurnOff"): ("spegnere, chiudere o sbloccare", "turn off, close or unlock"),
@@ -147,8 +152,8 @@ class Entity:
             return True
         if self.domain == "cover" and self.device_class in _RISKY_CLASSES:
             return True
-        # Relays and generic covers often drive gates/doors: judge them by name too.
-        return self.domain in {"switch", "button", "cover", "input_boolean"} and bool(_RISKY_WORDS.search(norm(self.name)))
+        # Relays, generic covers and scripts often drive gates/doors: judge them by name too.
+        return self.domain in _NAMED_DOMAINS and bool(_RISKY_WORDS.search(norm(self.name)))
 
 
 def _as_list(v) -> list[str]:

@@ -103,6 +103,9 @@ HOME = _index(
     ("switch.relay_ingresso", "Apertura cancello", None),
     ("light.kitchen", "Luce cucina", None),
     ("light.porta", "Luce porta ingresso", None),
+    ("script.apri_garage", "Apri garage", None),
+    ("scene.esco_di_casa", "Esco e chiudo la porta", None),
+    ("script.buongiorno", "Buongiorno", None),
 )
 
 
@@ -122,6 +125,16 @@ def test_risk_policy_known_entities():
     assert q("intent__HassTurnOn", {"name": "Luce porta ingresso"}) is None  # a light, even with "porta"
     assert q("intent__HassTurnOn", {"name": "Tapparella sala"}) is None  # shutters are not doors
     assert q("light__HassLightSet", {"name": "Porta luce", "brightness": 10}) is None
+
+
+def test_risk_policy_scripts_and_scenes():
+    """Scripts and scenes can drive anything: never safe by domain, judged by name."""
+    assert q("intent__HassTurnOn", {"name": "Apri garage"}) == "Vuoi davvero avviare Apri garage?"
+    assert q("intent__HassTurnOn", {"name": "Apri garage", "domain": ["script"]}) == "Vuoi davvero avviare Apri garage?"
+    assert q("intent__HassTurnOn", {"name": "Esco e chiudo la porta", "domain": ["scene"]}, "en") == \
+        "Do you really want to activate Esco e chiudo la porta?"
+    assert q("intent__HassTurnOn", {"name": "Buongiorno", "domain": ["script"]}) is None  # known, harmless name
+    assert q("intent__HassTurnOn", {"name": "Sconosciuto", "domain": ["script"]}) is not None  # unknown: confirm
 
 
 def test_risk_policy_fails_closed():

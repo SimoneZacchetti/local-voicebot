@@ -59,19 +59,28 @@ def test_risky_action_is_blocked_by_default(api):
 
 def test_risky_action_with_confirmation_and_pin(api, monkeypatch):
     monkeypatch.setattr(cfg, "api_allow_risky", True)
-    monkeypatch.setattr(cfg, "api_confirm_pin", "2468")
+    monkeypatch.setattr(cfg, "api_confirm_pin", "246813")
     r = cmd(api, "sblocca la porta di casa").json()
     assert r["status"] == "needs_confirmation" and r["question"].startswith("Vuoi davvero")
     assert 0 < r["expires_in"] <= cfg.api_confirm_ttl_s
     sid = r["session_id"]
-    assert api.post("/api/confirm", json={"session_id": sid, "yes": True, "pin": "0000"}, headers=AUTH).status_code == 403
-    assert api.home.calls == []
-    r = api.post("/api/confirm", json={"session_id": sid, "yes": True, "pin": "2468"}, headers=AUTH)
+    r = api.post("/api/confirm", json={"session_id": sid, "yes": True, "pin": "246813"}, headers=AUTH)
     assert r.status_code == 200 and r.json()["status"] == "done"
     assert api.home.calls == [("intent__HassTurnOff", {"name": "Porta di casa"})]
     # Already used: a second confirmation finds nothing to confirm
-    r = api.post("/api/confirm", json={"session_id": sid, "yes": True, "pin": "2468"}, headers=AUTH)
+    r = api.post("/api/confirm", json={"session_id": sid, "yes": True, "pin": "246813"}, headers=AUTH)
     assert r.status_code == 410 and len(api.home.calls) == 1
+
+
+def test_wrong_pin_cancels_the_action(api, monkeypatch):
+    monkeypatch.setattr(cfg, "api_allow_risky", True)
+    monkeypatch.setattr(cfg, "api_confirm_pin", "246813")
+    sid = cmd(api, "sblocca la porta di casa").json()["session_id"]
+    r = api.post("/api/confirm", json={"session_id": sid, "yes": True, "pin": "000000"}, headers=AUTH)
+    assert r.status_code == 403 and r.json()["status"] == "forbidden"
+    # No second guess: the right PIN now finds nothing to confirm
+    r = api.post("/api/confirm", json={"session_id": sid, "yes": True, "pin": "246813"}, headers=AUTH)
+    assert r.status_code == 410 and api.home.calls == []
 
 
 def test_risky_action_refused(api, monkeypatch):

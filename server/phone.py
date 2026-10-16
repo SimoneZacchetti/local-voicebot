@@ -67,14 +67,14 @@ class PhoneSessions:
     async def command(self, text: str, sid: str | None = None) -> dict:
         sid, entry = self._get(sid)
         if self._busy(entry):
-            return {"status": "running", "reply": "Sto ancora lavorando alla richiesta precedente.", "session_id": sid}
+            return {"status": "running", "reply": "Still working on the previous request.", "session_id": sid}
         async with entry.lock:
             s = entry.session
             s.pending = None  # a reply sent here is never the answer to "are you sure?"
             async with s.lock:
                 turn = s.run_text(text)
             if turn is None:
-                return {"status": "error", "reply": "Messaggio vuoto.", "session_id": sid}
+                return {"status": "error", "reply": "Empty message.", "session_id": sid}
             entry.turn = turn
             return await self._result(sid, entry, turn)
 
@@ -86,7 +86,8 @@ class PhoneSessions:
                 entry.session.pending = None
             raise ConfirmError(410, {"status": "expired", "reply": EXPIRED, "session_id": sid})
         if cfg.api_confirm_pin and not hmac.compare_digest(str(pin).encode(), cfg.api_confirm_pin.encode()):
-            raise ConfirmError(403, {"status": "forbidden", "reply": "PIN sbagliato.", "session_id": sid})
+            entry.session.pending = None  # one attempt per request: no guessing the PIN before it expires
+            raise ConfirmError(403, {"status": "forbidden", "reply": "Wrong PIN, say the command again.", "session_id": sid})
         async with entry.lock:
             s = entry.session
             async with s.lock:
@@ -100,7 +101,7 @@ class PhoneSessions:
             await asyncio.wait_for(asyncio.shield(turn.task), cfg.api_timeout_s)
         except TimeoutError:
             # Not cancelled: the house may already be acting. The next command says "running".
-            return {"status": "running", "reply": "Ci sto lavorando, ci vuole un po'.", "session_id": sid}
+            return {"status": "running", "reply": "Working on it, this takes a while.", "session_id": sid}
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - logged by the session task callback

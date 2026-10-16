@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import router as api_router
-from .auth import RemoteGate
+from .auth import RemoteGate, SecurityHeaders
 from .config import cfg
 from .langid import LangId
 from .llm import LlmRouter
@@ -102,6 +102,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(RemoteGate)  # local/remote access rules: server/auth.py
+app.add_middleware(SecurityHeaders)  # outermost: refusals get the headers too
 app.include_router(api_router)
 
 

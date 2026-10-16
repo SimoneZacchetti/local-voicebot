@@ -16,6 +16,7 @@ import uvicorn
 from .config import cfg
 
 MIN_TOKEN_CHARS = 32
+MIN_PIN_DIGITS = 6
 
 
 def is_loopback(host: str) -> bool:
@@ -29,6 +30,9 @@ def config_problems() -> list[str]:
     problems = []
     if not is_loopback(cfg.host):
         problems.append(f"HOST={cfg.host} is not loopback: never expose the server directly, use `tailscale serve`")
+    pin = cfg.api_confirm_pin
+    if cfg.api_allow_risky and not (pin.isdigit() and len(pin) >= MIN_PIN_DIGITS):
+        problems.append(f"API_ALLOW_RISKY=true needs API_CONFIRM_PIN with >= {MIN_PIN_DIGITS} digits")
     if cfg.remote_enabled:
         if cfg.remote_port == cfg.port:
             problems.append("REMOTE_PORT must differ from PORT")

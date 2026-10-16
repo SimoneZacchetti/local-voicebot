@@ -134,7 +134,7 @@ If the Mac is unreachable, **Get Contents of URL** fails and Shortcuts shows an 
 
 They are refused by default. To enable them:
 
-1. In `.env` set `API_ALLOW_RISKY=true` and an `API_CONFIRM_PIN=<pin>`.
+1. In `.env` set `API_ALLOW_RISKY=true` and an `API_CONFIRM_PIN=<pin>` of at least 6 digits (the server refuses to start otherwise).
 2. In the shortcut, after **Get Contents of URL** add:
    1. **If** `status` is `needs_confirmation`:
       - **Speak Text** `question`;
@@ -143,6 +143,7 @@ They are refused by default. To enable them:
       - **Get Contents of URL**: `POST /api/confirm` with JSON `{"session_id": "phone", "yes": true|false, "pin": "<input>"}` and the same headers.
    2. You have **60 seconds** (`API_CONFIRM_TTL_S`). An expired confirmation returns `expired` and executes nothing.
    3. A "yes" sent as a normal command never confirms anything.
+   4. A wrong PIN cancels the action (`forbidden`): repeat the command to try again.
 
 **Never** attach lock, door or alarm shortcuts to the Lock Screen or Control Center.
 

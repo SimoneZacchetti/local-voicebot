@@ -114,6 +114,33 @@ class RemoteGate:
         await send({"type": "http.response.body", "body": b"forbidden"})
 
 
+# No framing (another site could click "Yes" or "Start talking" in a hidden frame), no MIME sniffing.
+SECURITY_HEADERS = [
+    (b"x-frame-options", b"DENY"),
+    (b"content-security-policy", b"frame-ancestors 'none'"),
+    (b"x-content-type-options", b"nosniff"),
+    (b"referrer-policy", b"no-referrer"),
+]
+
+
+class SecurityHeaders:
+    """ASGI middleware adding :data:`SECURITY_HEADERS` to every HTTP response."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def send_with_headers(message) -> None:
+            if message["type"] == "http.response.start":
+                message["headers"] = [*message.get("headers", []), *SECURITY_HEADERS]
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
 async def require_token(request: Request) -> None:
     """FastAPI dependency for /api: Authorization: Bearer <one of API_TOKENS>."""
     if not cfg.api_tokens:

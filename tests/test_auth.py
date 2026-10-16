@@ -161,6 +161,24 @@ def test_startup_refuses_incomplete_remote_config(monkeypatch):
     assert entry.config_problems() == []
 
 
+def test_startup_refuses_risky_api_without_a_strong_pin(monkeypatch):
+    monkeypatch.setattr(cfg, "host", "127.0.0.1")
+    monkeypatch.setattr(cfg, "remote_enabled", False)
+    monkeypatch.setattr(cfg, "api_allow_risky", True)
+    for pin in ["", "1234", "abcdefgh"]:
+        monkeypatch.setattr(cfg, "api_confirm_pin", pin)
+        assert any("API_CONFIRM_PIN" in p for p in entry.config_problems())
+    monkeypatch.setattr(cfg, "api_confirm_pin", "246813")
+    assert entry.config_problems() == []
+
+
+def test_pages_cannot_be_framed(client, remote):  # noqa: F811
+    for r in [client.get("/"), client.get("/stats"), remote.get("/", headers={"Tailscale-User-Login": "x@y.z"})]:
+        assert r.headers["x-frame-options"] == "DENY"
+        assert r.headers["content-security-policy"] == "frame-ancestors 'none'"
+    assert r.status_code == 403  # refusals carry the headers too
+
+
 def test_public_host_with_custom_https_port(remote, monkeypatch):
     """`tailscale serve --https=9443`: Origin carries the port, Host is checked without it."""
     monkeypatch.setattr(cfg, "public_host", f"{HOST}:9443")
