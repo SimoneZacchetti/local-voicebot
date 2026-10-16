@@ -21,6 +21,8 @@ Latency measured on an M5 Pro: **~0.4–0.8 s** from the moment the server recei
 
 ## Installation
 
+`./start.sh` does all of this for you (and then starts the server). The manual steps:
+
 ```bash
 brew install --cask ollama                 # the app, not the formula
 launchctl setenv OLLAMA_KEEP_ALIVE -1      # keeps the model in memory; then restart the Ollama app
@@ -35,7 +37,7 @@ uv run python scripts/check_env.py         # checks everything (downloads the ST
 ## Running
 
 ```bash
-uv run uvicorn server.main:app --host 127.0.0.1 --port 8000
+./start.sh                 # or: uv run python -m server
 ```
 
 Open <http://localhost:8000> in Chrome, press "Start talking" and speak. The sphere in the middle follows the voice in real time: yours when you speak, the bot's when it answers. Its color changes with the state (blue: listening/speaking, purple: thinking, gray: microphone off). Subtitles scroll below the sphere; the full history is in the panel at the top right. Space bar or the microphone button: mute/unmute the microphone. The first run downloads the models (~4 GB); after that, the server is ready in ~6 s.
