@@ -141,6 +141,9 @@ All keys are in [.env.example](../.env.example). The most useful ones:
 | Key | Default | Notes |
 |---|---|---|
 | `LLM_MODEL` | `qwen3.6:35b-a3b-nvfp4` | `gemma4:26b-nvfp4`: better at arithmetic, but Ollama drops ~10% of its tool calls (the bot retries). `scripts/bench_tools.py` compares models on home commands |
+| `LLM_TEMPERATURE` | `0.4` | lower = more precise and consistent answers, higher = more varied |
+| `LLM_THINK` | `auto` | `auto` lets the local model reason only on questions that look hard (why, explain, compare, arithmetic…): smarter answers there, a few seconds more before the first audio. `off` never, `always` on every turn |
+| `LLM_THINK_BUDGET` | `500` | max reasoning tokens (~5 s locally). Past it, the model answers without thinking, from the notes it took |
 | `VAD_REDEMPTION_MS` | `550` | silence that ends the turn; lower = more responsive but cuts you off during pauses |
 | `CONTINUATION_S` | `1.2` | window for merging an utterance resumed right after the answer starts |
 | `DEFAULT_LANG` | `it` | initial language |
