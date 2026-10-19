@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import os
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -17,9 +20,31 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from server.config import POCKET_LANG_NAMES, cfg
+from server.config import IS_APPLE_SILICON, POCKET_LANG_NAMES, cfg
 
-OK, FAIL, WARN = "\033[32mOK\033[0m", "\033[31mFAIL\033[0m", "\033[33mWARN\033[0m"
+WINDOWS = sys.platform == "win32"
+
+
+def use_colors() -> bool:
+    if not sys.stdout.isatty() or "NO_COLOR" in os.environ:
+        return False
+    if not WINDOWS:
+        return True
+    try:  # Turn on ANSI escape processing in the Windows console (ENABLE_VIRTUAL_TERMINAL_PROCESSING).
+        import ctypes
+
+        k32 = ctypes.windll.kernel32
+        handle, mode = k32.GetStdHandle(-11), ctypes.c_uint32()
+        return bool(k32.GetConsoleMode(handle, ctypes.byref(mode)) and k32.SetConsoleMode(handle, mode.value | 0x0004))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+sys.stdout.reconfigure(errors="replace")
+if use_colors():
+    OK, FAIL, WARN = "\033[32mOK\033[0m", "\033[31mFAIL\033[0m", "\033[33mWARN\033[0m"
+else:
+    OK, FAIL, WARN = "OK", "FAIL", "WARN"
 failures = 0
 
 
@@ -37,19 +62,31 @@ async def check_ollama() -> None:
         except Exception as e:  # noqa: BLE001
             return report(FAIL, "Ollama reachable", f"{root} ({e}). Start the Ollama app.")
         report(OK, "Ollama reachable", f"version {v}")
+        tag = cfg.llm_model.lower()
+        if not IS_APPLE_SILICON and any(s in tag for s in ("nvfp4", "mxfp8", "-mlx")):
+            return report(FAIL, f"model {cfg.llm_model}", "this tag runs only on Apple Silicon. Use a GGUF tag: "
+                          "LLM_MODEL=qwen3.6:35b-a3b (or qwen3.5:9b with 16 GB RAM, qwen3.5:4b on low-end machines)")
         tags = [m["name"] for m in (await c.get("/api/tags")).json()["models"]]
         if cfg.llm_model not in tags:
             return report(FAIL, f"model {cfg.llm_model}", f"not pulled. Run: ollama pull {cfg.llm_model}")
         report(OK, f"model {cfg.llm_model}", "pulled")
 
+        caps = set((await c.post("/api/show", json={"model": cfg.llm_model})).json().get("capabilities") or [])
+        thinking = "thinking" in caps
+        if caps:
+            if "tools" not in caps and cfg.home_backend == "ha":
+                report(FAIL, "LLM tool calling", "model does not support tools, needed by HOME_BACKEND=ha")
+            if not thinking and cfg.llm_think != "off":
+                report(WARN, "LLM thinking", "model does not support thinking: set LLM_THINK=off in .env")
+            report(OK, "LLM capabilities", ", ".join(sorted(caps)))
+
         from server.llm import OllamaLlm
         from server.prompts import build_messages
 
-        llm = OllamaLlm()
-        await llm.warmup()
         msgs = build_messages([{"role": "user", "content": "Ciao! Come ti chiami?"}], "it")
-        body = {"model": cfg.llm_model, "messages": msgs, "think": False, "stream": False,
-                "options": {"num_predict": 60}}
+        body = {"model": cfg.llm_model, "messages": msgs, "stream": False, "options": {"num_predict": 60}}
+        if thinking or not caps:
+            body["think"] = False
         r = (await c.post("/api/chat", json=body)).json()
         msg = r.get("message", {})
         if msg.get("thinking"):
@@ -58,27 +95,49 @@ async def check_ollama() -> None:
             report(FAIL, "LLM reply", f"empty content: {r}")
         else:
             report(OK, "thinking disabled", repr(msg["content"][:60]))
-        t = time.perf_counter()
-        async for _ in llm.stream(msgs):
-            break
-        ttft = (time.perf_counter() - t) * 1000
-        report(OK if ttft < 450 else WARN, "LLM time to first token", f"{ttft:.0f} ms")
+        try:
+            llm = OllamaLlm()
+            await llm.warmup()
+            t = time.perf_counter()
+            async for _ in llm.stream(msgs):
+                break
+            ttft = (time.perf_counter() - t) * 1000
+            report(OK if ttft < 450 else WARN, "LLM time to first token", f"{ttft:.0f} ms")
+        except Exception as e:  # noqa: BLE001
+            report(FAIL, "LLM streaming (server client)", str(e)[:200])
         ps = (await c.get("/api/ps")).json().get("models", [])
         resident = [m for m in ps if m["name"] == cfg.llm_model]
         if resident:
             report(OK, "model resident in memory", f"expires {resident[0].get('expires_at', '?')}")
         else:
-            report(WARN, "model resident in memory", "not loaded; set OLLAMA_KEEP_ALIVE=-1")
+            hint = ("[Environment]::SetEnvironmentVariable('OLLAMA_KEEP_ALIVE', '-1', 'User') in PowerShell, "
+                    "then quit and reopen Ollama from the tray" if WINDOWS
+                    else "launchctl setenv OLLAMA_KEEP_ALIVE -1, then restart Ollama" if sys.platform == "darwin"
+                    else "set OLLAMA_KEEP_ALIVE=-1 in the Ollama service environment")
+            report(WARN, "model resident in memory", f"not loaded; {hint}")
+
+
+VC_HINT = "install the latest Microsoft Visual C++ runtime: https://aka.ms/vs/17/release/vc_redist.x64.exe"
+
+
+def is_dll_error(e: Exception) -> bool:
+    # A plain OSError (not FileNotFoundError etc.) is what ctypes raises for a DLL that fails to load.
+    return WINDOWS and ("DLL load failed" in str(e) or type(e) is OSError or not str(e))
 
 
 def check_stt() -> None:
-    from server.stt import ParakeetStt
+    what = f"STT {cfg.stt_backend} {cfg.stt_model}"
+    try:
+        from server.stt import make_local_stt
 
-    stt = ParakeetStt(cfg.stt_model)
-    stt._warmup()
-    t = time.perf_counter()
-    stt._transcribe(np.zeros(16000 * 3, dtype=np.float32))
-    report(OK, f"STT {cfg.stt_model}", f"3 s clip in {(time.perf_counter() - t) * 1000:.0f} ms")
+        stt = make_local_stt()
+        stt._warmup()
+        t = time.perf_counter()
+        stt._transcribe(np.zeros(16000 * 3, dtype=np.float32))
+    except Exception as e:  # noqa: BLE001
+        hint = VC_HINT if is_dll_error(e) else "run `uv sync` and check STT_BACKEND / STT_MODEL in .env"
+        return report(FAIL, what, f"{type(e).__name__}: {str(e)[:200]}. Hint: {hint}")
+    report(OK, what, f"3 s clip in {(time.perf_counter() - t) * 1000:.0f} ms")
 
 
 def check_tts() -> None:
@@ -98,7 +157,7 @@ def check_tts() -> None:
             first = next(tts._pcm16_stream(lang, "Questa è una prova della voce.", threading.Event()))
             report(OK, f"TTS {lang} ({cfg.voices[lang]})", f"first chunk {(time.perf_counter() - t) * 1000:.0f} ms, {len(first)} bytes")
         except Exception as e:  # noqa: BLE001
-            report(FAIL, f"TTS {lang}", str(e))
+            report(FAIL, f"TTS {lang}", f"{e}. Hint: {VC_HINT}" if is_dll_error(e) else str(e))
 
 
 def is_tailscale(url: str) -> bool:
@@ -140,7 +199,7 @@ async def check_home() -> None:
     try:
         tools = await ha.list_tools()
     except httpx.TransportError as e:
-        hint = ("is Tailscale connected on this Mac (menu bar icon) and is the Tailscale add-on running in HA?"
+        hint = ("is Tailscale connected on this computer and is the Tailscale add-on running in HA?"
                 if is_tailscale(cfg.ha_url) else "is Home Assistant on and on the same network?")
         return report(FAIL, f"Home Assistant at {cfg.ha_url}", f"not reachable ({type(e).__name__}): {hint}")
     except Exception as e:  # noqa: BLE001
@@ -179,16 +238,43 @@ async def check_groq() -> None:
 
 
 def tailscale_cli() -> str | None:
-    import shutil
+    candidates = (Path("/Applications/Tailscale.app/Contents/MacOS/Tailscale"),
+                  Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Tailscale" / "tailscale.exe")
+    return shutil.which("tailscale") or next((str(p) for p in candidates if p.exists()), None)
 
-    return shutil.which("tailscale") or next(
-        (p for p in ("/Applications/Tailscale.app/Contents/MacOS/Tailscale",) if Path(p).exists()), None)
+
+# Everyone, Authenticated Users, BUILTIN\Users: SIDs, because account names are localized.
+BROAD_SIDS = {"S-1-1-0": "Everyone", "S-1-5-11": "Authenticated Users", "S-1-5-32-545": "Users"}
+
+
+def check_env_permissions(env: Path) -> None:
+    if not WINDOWS:
+        mode = env.stat().st_mode & 0o777
+        return report(OK if mode & 0o077 == 0 else WARN, ".env permissions",
+                      f"{mode:o}" + ("" if mode & 0o077 == 0 else ": run chmod 600 .env"))
+    ps = shutil.which("powershell") or shutil.which("pwsh")
+    if not ps:
+        return
+    # First line: the current user's SID, so the hint works in cmd and PowerShell (and for domain/Entra accounts).
+    cmd = ("[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
+           "(Get-Acl -LiteralPath $env:VOICEBOT_ENV).Access | ForEach-Object "
+           "{ $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }")
+    out = subprocess.run([ps, "-NoProfile", "-NonInteractive", "-Command", cmd], check=False, capture_output=True,
+                         text=True, timeout=30, env={**os.environ, "VOICEBOT_ENV": str(env)})
+    if out.returncode != 0:
+        return
+    me, *sids = out.stdout.split() or [""]
+    broad = sorted({BROAD_SIDS[s] for s in sids if s in BROAD_SIDS})
+    if broad:
+        report(WARN, ".env permissions", f"readable by {', '.join(broad)}: run "
+               f'icacls .env /inheritance:r /grant:r "*{me}:(M)"')
+    else:
+        report(OK, ".env permissions", "only your account and administrators")
 
 
 def check_remote() -> None:
     """Phone access: config sanity, secrets hygiene and what `tailscale serve` publishes."""
     import json
-    import subprocess
 
     from server.__main__ import config_problems
 
@@ -198,11 +284,14 @@ def check_remote() -> None:
         return report(OK, "remote access", "disabled (REMOTE_ENABLED=false)")
     root = Path(__file__).resolve().parent.parent
     env = root / ".env"
-    tracked = subprocess.run(["git", "ls-files", "--error-unmatch", ".env"], check=False, cwd=root, capture_output=True).returncode == 0
-    report(FAIL if tracked else OK, ".env in git", "TRACKED: remove it from git now" if tracked else "not tracked")
+    git = shutil.which("git")
+    if not git:
+        report(WARN, ".env in git", "git not found, skipped")
+    else:
+        tracked = subprocess.run([git, "ls-files", "--error-unmatch", ".env"], check=False, cwd=root, capture_output=True).returncode == 0
+        report(FAIL if tracked else OK, ".env in git", "TRACKED: remove it from git now" if tracked else "not tracked")
     if env.exists():
-        mode = env.stat().st_mode & 0o777
-        report(OK if mode & 0o077 == 0 else WARN, ".env permissions", f"{mode:o}" + ("" if mode & 0o077 == 0 else ": run chmod 600 .env"))
+        check_env_permissions(env)
     report(OK if cfg.api_tokens else WARN, "API_TOKENS", f"{len(cfg.api_tokens)} device token(s)" if cfg.api_tokens else "none: Siri Shortcuts disabled")
     cli = tailscale_cli()
     if not cli:

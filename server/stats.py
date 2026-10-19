@@ -63,7 +63,10 @@ class Stats:
     def record(self, source: str, lang: str, llm: str, actions: int, metrics: dict) -> None:
         """Queue one finished turn; returns at once."""
         row = (time.time(), source, lang, llm, actions, json.dumps(metrics))
-        self.exec.submit(self._insert, row)
+        try:
+            self.exec.submit(self._insert, row)
+        except RuntimeError:  # closed: a turn finishing during shutdown
+            log.warning("stats closed, turn not recorded")
 
     def _insert(self, row: tuple) -> None:
         try:
@@ -75,6 +78,12 @@ class Stats:
     def flush(self) -> None:
         """Wait for queued writes (tests, shutdown)."""
         self.exec.submit(lambda: None).result()
+
+    def close(self) -> None:
+        """Flush and release the file (Windows keeps an open SQLite file locked)."""
+        self.exec.shutdown(wait=True)
+        with self.lock:
+            self.db.close()
 
     def summary(self, hours: float, source: str | None = None, now: float | None = None) -> dict:
         now = time.time() if now is None else now

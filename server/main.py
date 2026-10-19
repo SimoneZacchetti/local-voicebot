@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -33,6 +34,16 @@ log.setLevel(logging.INFO)
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
+
+# StaticFiles takes Content-Type from mimetypes, which on Windows reads the registry (often .js = text/plain).
+# With nosniff, a wrong type breaks module scripts, worklets, the service worker and ORT's .mjs/.wasm.
+MIME_TYPES = {
+    ".js": "text/javascript", ".mjs": "text/javascript", ".wasm": "application/wasm", ".json": "application/json",
+    ".webmanifest": "application/manifest+json", ".css": "text/css", ".svg": "image/svg+xml", ".html": "text/html",
+    ".onnx": "application/octet-stream", ".png": "image/png",
+}
+for ext, mime in MIME_TYPES.items():
+    mimetypes.add_type(mime, ext)
 
 
 def build_services() -> Services:
@@ -97,7 +108,7 @@ async def lifespan(app: FastAPI):
     if retry:
         retry.cancel()
     if app.state.svc.stats is not None:
-        app.state.svc.stats.flush()
+        app.state.svc.stats.close()
 
 
 app = FastAPI(lifespan=lifespan)

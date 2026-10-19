@@ -5,6 +5,8 @@ Languages without a Pocket model are spoken by the browser (speechSynthesis).
 
 from __future__ import annotations
 
+import builtins
+import functools
 import logging
 import threading
 import time
@@ -18,6 +20,15 @@ from .workers import TTS_EXEC, run_in, stream_in
 log = logging.getLogger("voicebot.tts")
 
 SAMPLE_RATE = 24000
+
+
+def utf8_pocket_configs() -> None:
+    """pocket_tts reads its language YAMLs with a bare open(), i.e. the locale encoding: cp1252 on Windows
+    fails on the UTF-8 quotes in italian/french/german/... configs. Shadow open in that module only."""
+    import pocket_tts.utils.config as pcfg
+
+    if getattr(pcfg, "open", builtins.open) is builtins.open:
+        pcfg.open = functools.partial(builtins.open, encoding="utf-8")
 
 
 class PocketTts:
@@ -36,6 +47,7 @@ class PocketTts:
             return
         from pocket_tts import TTSModel
 
+        utf8_pocket_configs()
         t = time.perf_counter()
         try:
             model = TTSModel.load_model(language=POCKET_LANG_NAMES[lang], quantize=cfg.pocket_quantize)

@@ -1,7 +1,7 @@
 """Who may talk to the server.
 
 The server listens on two loopback ports (see ``server/__main__.py``): the local one for the
-Mac's own browser and the remote one, published on the tailnet by ``tailscale serve``. Which
+computer's own browser and the remote one, published on the tailnet by ``tailscale serve``. Which
 one a request came in on is decided by the listening port, never by headers.
 
 - Local port: Host must be loopback (DNS rebinding) and a page opening /ws must come from an

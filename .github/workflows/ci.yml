@@ -38,3 +38,83 @@ jobs:
 
       - name: Tests
         run: uv run pytest -q
+
+  test-windows:
+    # Windows 10/11 x64 support (start.cmd): STT runs on ONNX there, no MLX. Lint runs once, on macOS.
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: "1"
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # Reproduce the classic Windows registry bug: .js mapped to text/plain (Python's mimetypes reads HKCR).
+      # The server must override it, or module scripts/worklets are refused (X-Content-Type-Options: nosniff).
+      - name: Poison the .js/.mjs MIME types in the registry
+        run: |
+          reg add "HKCU\Software\Classes\.js" /v "Content Type" /t REG_SZ /d text/plain /f
+          reg add "HKCU\Software\Classes\.mjs" /v "Content Type" /t REG_SZ /d text/plain /f
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Import check
+        run: uv run python -c "import server.main"
+
+      - name: Tests
+        run: uv run pytest -q
+
+      - name: start.ps1 parses (PowerShell 7 and Windows PowerShell 5.1) and is ASCII-only
+        run: |
+          foreach ($exe in 'pwsh', 'powershell') {
+            & $exe -NoProfile -Command '$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path start.ps1).Path, [ref]$null, [ref]$e); if ($e) { $e | Out-String | Write-Host; exit 1 }'
+            if ($LASTEXITCODE) { throw "start.ps1 does not parse under $exe" }
+          }
+          if (@([IO.File]::ReadAllBytes("$PWD\start.ps1") | Where-Object { $_ -gt 127 }).Count) {
+            throw 'start.ps1 must be ASCII-only (Windows PowerShell 5.1 reads it as ANSI)'
+          }
+
+      - name: PSScriptAnalyzer
+        run: |
+          if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) { Install-Module PSScriptAnalyzer -Scope CurrentUser -Force }
+          Invoke-ScriptAnalyzer -Path start.ps1 -Severity Error -EnableExit
+
+      - name: start.cmd and start.ps1 have CRLF line endings
+        shell: bash
+        run: |
+          git ls-files --eol start.cmd | grep -q 'w/crlf'
+          git ls-files --eol start.ps1 | grep -q 'w/crlf'
+
+      - name: Server smoke test (no models, WARMUP=false)
+        env:
+          WARMUP: "false"
+          STATS_ENABLED: "false"
+        run: |
+          $p = Start-Process .venv\Scripts\python.exe -ArgumentList '-m', 'server' -PassThru -NoNewWindow
+          try {
+            $up = $false
+            for ($i = 0; $i -lt 60 -and -not $p.HasExited; $i++) {
+              try { Invoke-RestMethod http://127.0.0.1:8000/healthz | Out-Null; $up = $true; break } catch { Start-Sleep 1 }
+            }
+            if (-not $up) { throw 'the server did not answer /healthz within 60 s' }
+            $expected = [ordered]@{
+              'app.js' = 'text/javascript'
+              'player-worklet.js' = 'text/javascript'
+              'vendor/vad.worklet.bundle.min.js' = 'text/javascript'
+              'vendor/ort-wasm-simd-threaded.mjs' = 'text/javascript'
+              'vendor/ort-wasm-simd-threaded.wasm' = 'application/wasm'
+            }
+            foreach ($f in $expected.GetEnumerator()) {
+              $ct = "$((Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000/$($f.Key)").Headers['Content-Type'])"
+              if (-not $ct.StartsWith($f.Value)) { throw "$($f.Key): Content-Type $ct (expected $($f.Value))" }
+              Write-Host "$($f.Key): $ct"
+            }
+          } finally { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }

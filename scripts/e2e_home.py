@@ -70,15 +70,14 @@ SCENARIO = [
 
 
 async def main(url: str) -> int:
-    import mlx.core as mx
-    from parakeet_mlx import from_pretrained
-    from parakeet_mlx.audio import get_logmel
     from pocket_tts import TTSModel
+
+    from server.stt import make_local_stt
 
     setup()
     tts = TTSModel.load_model(language="italian")
     voice = tts.get_state_for_audio_prompt("giovanni")
-    stt = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
+    stt = make_local_stt()
     failures = 0
     async with websockets.connect(url, max_size=None) as ws:
         ready = json.loads(await ws.recv())
@@ -114,7 +113,7 @@ async def main(url: str) -> int:
             reply = ""
             if audio:
                 a = np.concatenate(audio).astype(np.float32) / 32768
-                reply = stt.generate(get_logmel(mx.array(resample_poly(a, 2, 3).astype(np.float32)), stt.preprocessor_config))[0].text
+                reply = stt._transcribe(resample_poly(a, 2, 3).astype(np.float32)).text
             await asyncio.sleep(0.3)
             ok, detail = check(reply)
             claims = any(w in reply.lower() for w in ("fatto", "ho acceso", "ho spento", "ho sbloccato", "ho aperto", "ho chiuso"))

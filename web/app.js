@@ -82,7 +82,7 @@ const wsOpen = () => ws?.readyState === WebSocket.OPEN;
 
 function refreshState() {
   if (!running) return setState("idle", starting ? "Starting…" : "Press to start");
-  if (!wsOpen() && !starting) return setState("thinking", reconnectTries > 3 ? "Mac unreachable" : "Reconnecting…");
+  if (!wsOpen() && !starting) return setState("thinking", reconnectTries > 3 ? "Server unreachable" : "Reconnecting…");
   if (botActive() && !bargePaused) return setState("speaking", "Tap the orb or speak to interrupt");
   if (muted) return setState("listening", "Microphone muted");
   setState("listening", "Listening");
@@ -380,7 +380,7 @@ function connect() {
         onAudio(e.data);
       }
     };
-    sock.onerror = () => reject(new Error("Mac unreachable (is it on? is Tailscale running?)"));
+    sock.onerror = () => reject(new Error("Server unreachable (is the computer on? is Tailscale running?)"));
     sock.onclose = () => {
       reject(new Error("connection closed by the server")); // no-op once resolved
       if (ws !== sock) return; // closed by teardown
@@ -389,7 +389,7 @@ function connect() {
         if (opened) notice("Lost connection to the server.");
         return; // the chat reconnects on the next message
       }
-      // Voice on: screen lock, Wi-Fi <-> cellular, Mac restarted... keep the mic and retry.
+      // Voice on: screen lock, Wi-Fi <-> cellular, server restarted... keep the mic and retry.
       flushPlayback();
       scheduleReconnect();
       refreshState();
