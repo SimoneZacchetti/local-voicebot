@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 
@@ -22,6 +23,29 @@ from .tools import ToolCall
 log = logging.getLogger("voicebot.llm")
 
 Delta = str | ToolCall
+
+# Words that announce a question worth reasoning about, in the 7 supported languages.
+_HARD = re.compile(
+    r"\b(perch[eé]|come mai|spiega|calcola|quanto fa|confronta|differenz|ragiona|dimostra|risolvi|analizza|"
+    r"conviene|pro e contro|why|explain|calculate|compute|how much is|compare|difference|reason|prove|solve|"
+    r"analy[sz]e|pros and cons|step by step|pourquoi|expliqu|calcul|compar|diff[ée]rence|warum|erkl[äa]r|"
+    r"berechne|vergleich|unterschied|por ?qu[eé]|porqu[eê]|explica|diferen[cç]a|waarom|leg uit|bereken|"
+    r"vergelijk|verschil)",
+    re.IGNORECASE,
+)
+_MATH = re.compile(r"\d\s*[-+*/x×÷^]\s*\d")
+
+
+def wants_thinking(messages: list[dict]) -> bool:
+    """Reason only on a fresh user question that looks hard: reasoning costs 1-3 s before
+    the first word, too much for small talk and home commands."""
+    if cfg.llm_think in ("off", "always"):
+        return cfg.llm_think == "always"
+    last = messages[-1] if messages else {}
+    if last.get("role") != "user":
+        return False  # tool results: just report them
+    text = str(last.get("content", ""))
+    return bool(_HARD.search(text) or _MATH.search(text))
 
 
 def to_ollama(messages: list[dict]) -> list[dict]:
@@ -62,8 +86,8 @@ class OllamaLlm:
         self.root = cfg.llm_base_url.removesuffix("/").removesuffix("/v1")
         self.client = httpx.AsyncClient(base_url=self.root, timeout=httpx.Timeout(60.0, connect=3.0))
 
-    def _body(self, messages: list[dict], tools: list[dict], **extra) -> dict:
-        body = {"model": cfg.llm_model, "messages": to_ollama(messages), "think": False, "keep_alive": -1, **extra}
+    def _body(self, messages: list[dict], tools: list[dict], think: bool = False, **extra) -> dict:
+        body = {"model": cfg.llm_model, "messages": to_ollama(messages), "think": think, "keep_alive": -1, **extra}
         if tools:
             body["tools"] = tools  # identical on every call: keeps the prompt cache warm
         return body
@@ -81,12 +105,36 @@ class OllamaLlm:
         r.raise_for_status()
 
     async def stream(self, messages: list[dict], tools: list[dict] | None = None) -> AsyncIterator[Delta]:
-        body = self._body(messages, tools or [], stream=True,
-                          options={"num_predict": cfg.llm_max_tokens, "temperature": cfg.llm_temperature})
+        if not wants_thinking(messages):
+            async for d in self._stream(messages, tools, think=False):
+                yield d
+            return
+        log.info("thinking on this question")
+        notes: list[str] = []
+        async for d in self._stream(messages, tools, think=True, notes=notes):
+            yield d
+        if len(notes) < cfg.llm_think_budget:
+            return
+        # The model got lost in its reasoning (it loops on the format rules) before saying
+        # anything: answer without thinking, from the notes it took so far.
+        log.warning("thinking budget of %d tokens used up, answering without it", cfg.llm_think_budget)
+        msgs = [dict(m) for m in messages]
+        msgs[-1]["content"] += f"\n\n(Your notes so far, use them and answer now: {''.join(notes)})"
+        async for d in self._stream(msgs, tools, think=False):
+            yield d
+
+    async def _stream(self, messages: list[dict], tools: list[dict] | None, think: bool,
+                      notes: list[str] | None = None) -> AsyncIterator[Delta]:
+        """With ``think``, reasoning chunks go to ``notes``; the stream stops as soon as they
+        reach ``LLM_THINK_BUDGET`` (one chunk is one token) without any answer yet."""
+        body = self._body(messages, tools or [], think=think, stream=True, options={
+            "num_predict": cfg.llm_max_tokens + (cfg.llm_think_budget if think else 0),
+            "temperature": cfg.llm_temperature})
         async with self.client.stream("POST", "/api/chat", json=body) as r:
             if r.status_code != 200:
                 raise RuntimeError(f"ollama HTTP {r.status_code}: {(await r.aread())[:300]!r}")
             n = 0
+            answered = False
             async for line in r.aiter_lines():
                 if not line:
                     continue
@@ -94,7 +142,12 @@ class OllamaLlm:
                 if "error" in data:
                     raise RuntimeError(f"ollama: {data['error']}")
                 msg = data.get("message") or {}
+                if notes is not None and msg.get("thinking") and not answered:
+                    notes.append(msg["thinking"])
+                    if len(notes) >= cfg.llm_think_budget:
+                        return
                 if msg.get("content"):
+                    answered = True
                     yield msg["content"]
                 # Each tool call arrives whole, in its own chunk (done=false).
                 for c in msg.get("tool_calls") or []:
@@ -103,6 +156,7 @@ class OllamaLlm:
                     if isinstance(args, str):
                         args = json.loads(args or "{}")
                     n += 1
+                    answered = True
                     yield ToolCall(c.get("id") or f"call_{n}", fn.get("name", ""), args)
                 if data.get("done"):
                     break

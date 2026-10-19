@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from server import main
 from server.config import cfg
 from server.langid import LangId
-from server.llm import GroqLlm, OllamaLlm, to_ollama, to_openai
+from server.llm import GroqLlm, OllamaLlm, to_ollama, to_openai, wants_thinking
 from server.session import Services, Session
 from server.tools import ToolCall, ToolRegistry, confirmation_question, risk_of, yes_no
 
@@ -43,6 +43,67 @@ async def test_ollama_stream_yields_tool_calls_from_non_final_chunks():
         ToolCall("call_b", "intent__HassTurnOff", {"name": "Luce cucina"}),
     ]
     assert seen["body"]["tools"] == tools and seen["body"]["think"] is False
+
+
+@pytest.mark.parametrize("text, think", [
+    ("Accendi la luce in cucina", False),
+    ("Ciao, come stai?", False),
+    ("Perché il cielo è blu?", True),
+    ("Quanto fa 17 * 23?", True),
+    ("Explain how a heat pump works", True),
+    ("Warum ist das so?", True),
+])
+def test_wants_thinking_only_on_hard_user_questions(monkeypatch, text, think):
+    monkeypatch.setattr(cfg, "llm_think", "auto")
+    assert wants_thinking([{"role": "user", "content": text}]) is think
+
+
+def test_wants_thinking_modes(monkeypatch):
+    hard = [{"role": "user", "content": "Perché?"}]
+    tool = [*hard, {"role": "tool", "tool_call_id": "c", "name": "f", "content": "{}"}]
+    monkeypatch.setattr(cfg, "llm_think", "auto")
+    assert wants_thinking(tool) is False
+    monkeypatch.setattr(cfg, "llm_think", "off")
+    assert wants_thinking(hard) is False
+    monkeypatch.setattr(cfg, "llm_think", "always")
+    assert wants_thinking([{"role": "user", "content": "Ciao"}]) is True
+
+
+async def test_ollama_thinking_raises_token_budget(monkeypatch):
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, text=json.dumps({"message": {"content": "Perché sì."}, "done": True}))
+
+    monkeypatch.setattr(cfg, "llm_think", "auto")
+    llm = OllamaLlm()
+    llm.client = httpx.AsyncClient(base_url="http://x", transport=httpx.MockTransport(handler))
+    out = [d async for d in llm.stream([{"role": "user", "content": "Spiegami la relatività"}])]
+    assert out == ["Perché sì."]
+    assert seen["body"]["think"] is True
+    assert seen["body"]["options"]["num_predict"] == cfg.llm_max_tokens + cfg.llm_think_budget
+
+
+async def test_ollama_thinking_over_budget_answers_without_it(monkeypatch):
+    bodies = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        if body["think"]:  # reasons forever, never answers
+            return httpx.Response(200, text="\n".join(json.dumps({"message": {"thinking": "hmm "}, "done": False})
+                                                     for _ in range(10)))
+        return httpx.Response(200, text=json.dumps({"message": {"content": "Fa 439."}, "done": True}))
+
+    monkeypatch.setattr(cfg, "llm_think", "always")
+    monkeypatch.setattr(cfg, "llm_think_budget", 3)
+    llm = OllamaLlm()
+    llm.client = httpx.AsyncClient(base_url="http://x", transport=httpx.MockTransport(handler))
+    out = [d async for d in llm.stream([{"role": "user", "content": "Quanto fa 17 * 23 + 48?"}])]
+    assert out == ["Fa 439."]
+    assert [b["think"] for b in bodies] == [True, False]
+    assert bodies[1]["messages"][-1]["content"].endswith("(Your notes so far, use them and answer now: hmm hmm hmm )")
 
 
 def test_message_conversion():

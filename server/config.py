@@ -83,7 +83,11 @@ class Config:
     llm_api_key: str = field(default_factory=lambda: _env("LLM_API_KEY", "ollama"))
     llm_max_tokens: int = field(default_factory=lambda: _env_int("LLM_MAX_TOKENS", 300))
     llm_empty_retries: int = field(default_factory=lambda: _env_int("LLM_EMPTY_RETRIES", 2))
-    llm_temperature: float = field(default_factory=lambda: _env_float("LLM_TEMPERATURE", 0.7))
+    llm_temperature: float = field(default_factory=lambda: _env_float("LLM_TEMPERATURE", 0.4))
+    # Reasoning: "auto" thinks only on questions that look hard (why, explain, maths...), "off" never, "always" always
+    llm_think: str = field(default_factory=lambda: _env("LLM_THINK", "auto"))
+    # Max reasoning tokens before answering (~95 tokens/s locally); past it, answer without thinking
+    llm_think_budget: int = field(default_factory=lambda: _env_int("LLM_THINK_BUDGET", 500))
     history_max_turns: int = field(default_factory=lambda: _env_int("HISTORY_MAX_TURNS", 12))
     history_keep_turns: int = field(default_factory=lambda: _env_int("HISTORY_KEEP_TURNS", 6))
 
