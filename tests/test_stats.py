@@ -40,6 +40,7 @@ def test_summary_windows_sources_and_days(tmp_path):
     assert sum(d["turns"] for d in week["daily"]) == 4
 
     assert stats.summary(24, source="voice", now=now)["turns"] == 2
+    stats.close()
 
 
 def test_old_rows_are_dropped_on_open(tmp_path):
@@ -48,12 +49,17 @@ def test_old_rows_are_dropped_on_open(tmp_path):
     stats = Stats(tmp_path / "s.db")
     stats._insert((time.time() - 100 * 86400, "voice", "it", "ollama", 0, "{}"))
     stats._insert((time.time(), "voice", "it", "ollama", 0, "{}"))
-    assert Stats(tmp_path / "s.db", retention_days=90).summary(24 * 366)["turns"] == 1
+    stats.close()
+    reopened = Stats(tmp_path / "s.db", retention_days=90)
+    assert reopened.summary(24 * 366)["turns"] == 1
+    reopened.close()
 
 
 @pytest.fixture
 def stats(tmp_path):
-    return Stats(tmp_path / "stats.db")
+    s = Stats(tmp_path / "stats.db")
+    yield s
+    s.close()
 
 
 def test_voice_turn_is_recorded(client, stats):  # noqa: F811
@@ -90,3 +96,14 @@ def test_stats_endpoints(client, stats):  # noqa: F811
     page = client.get("/stats")
     assert page.status_code == 200 and "stats.json" in page.text
 
+
+
+def test_close_flushes_and_releases_the_file(tmp_path):
+    stats = Stats(tmp_path / "s.db")
+    stats.record("chat", "it", "ollama", 0, {"total_ms": 5})
+    stats.close()
+    stats.record("chat", "it", "ollama", 0, {})  # after shutdown: dropped, never raises
+    (tmp_path / "s.db").rename(tmp_path / "moved.db")  # Windows refuses this while the file is open
+    reopened = Stats(tmp_path / "moved.db")
+    assert reopened.summary(1)["turns"] == 1
+    reopened.close()

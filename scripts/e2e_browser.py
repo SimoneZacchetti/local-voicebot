@@ -1,4 +1,4 @@
-"""Browser end-to-end test: real Chrome, real VAD, fake microphone fed from a WAV file.
+"""Browser end-to-end test: real Chrome (or Edge), real VAD, fake microphone fed from a WAV file.
 
 Synthesizes a spoken question, feeds it to Chrome as the microphone, clicks Start and
 waits for the bot's transcript, reply and audio playback.
@@ -42,6 +42,21 @@ def make_wav(path: Path, scenario: str) -> None:
         w.writeframes((np.clip(pcm, -1, 1) * 32767).astype("<i2").tobytes())
 
 
+def launch(p, headed: bool, wav: Path):
+    args = [
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream",
+        f"--use-file-for-fake-audio-capture={wav}",
+        "--autoplay-policy=no-user-gesture-required",
+    ]
+    for channel in ("chrome", "msedge"):  # Windows machines often ship only Edge
+        try:
+            return p.chromium.launch(channel=channel, headless=not headed, args=args)
+        except Exception as e:  # noqa: BLE001
+            err = e
+    raise err
+
+
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     url = args[0] if args else "http://127.0.0.1:8000"
@@ -51,16 +66,7 @@ def main() -> int:
     make_wav(wav, scenario)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            channel="chrome",
-            headless=not headed,
-            args=[
-                "--use-fake-ui-for-media-stream",
-                "--use-fake-device-for-media-stream",
-                f"--use-file-for-fake-audio-capture={wav}",
-                "--autoplay-policy=no-user-gesture-required",
-            ],
-        )
+        browser = launch(p, headed, wav)
         page = browser.new_page()
         logs: list[str] = []
         page.on("console", lambda m: logs.append(f"[{m.type}] {m.text}"))

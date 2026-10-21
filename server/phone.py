@@ -45,7 +45,7 @@ class PhoneSessions:
 
     def _get(self, sid: str | None) -> tuple[str, PhoneSession]:
         now = time.monotonic()
-        for k in [k for k, v in self.sessions.items() if now - v.last_used > cfg.phone_session_ttl_s and not self._busy(v)]:
+        for k in [k for k, v in self.sessions.items() if now - v.last_used >= cfg.phone_session_ttl_s and not self._busy(v)]:
             del self.sessions[k]
         sid = sid or DEFAULT_ID
         entry = self.sessions.get(sid)
@@ -81,7 +81,7 @@ class PhoneSessions:
     async def confirm(self, sid: str, yes: bool, pin: str = "") -> dict:
         entry = self.sessions.get(sid)
         p = entry.session.pending if entry else None
-        if entry is None or p is None or not p.asked or time.monotonic() > p.expires_at:
+        if entry is None or p is None or not p.asked or time.monotonic() >= p.expires_at:
             if entry is not None:
                 entry.session.pending = None
             raise ConfirmError(410, {"status": "expired", "reply": EXPIRED, "session_id": sid})

@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import json
 import statistics
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -43,13 +42,17 @@ CASES = [
 QUALITY = ["Mi consigli un libro da leggere in vacanza?", "Spiegami in due frasi cos'è un buco nero."]
 
 
+OLLAMA = cfg.llm_base_url.removesuffix("/").removesuffix("/v1")
+
+
 async def ollama_stop(model: str) -> None:
-    await asyncio.to_thread(subprocess.run, ["ollama", "stop", model], check=False, capture_output=True)
+    async with httpx.AsyncClient(base_url=OLLAMA, timeout=60) as c:
+        await c.post("/api/generate", json={"model": model, "keep_alive": 0})
 
 
 async def run_model(model: str, reg: ToolRegistry, reps: int) -> dict:
     await ollama_stop(cfg.llm_model)
-    client = httpx.AsyncClient(base_url="http://localhost:11434", timeout=120)
+    client = httpx.AsyncClient(base_url=OLLAMA, timeout=120)
 
     async def chat(text: str, tools: bool = True) -> tuple[str, list[str], float]:
         body = {"model": model, "think": False, "stream": True, "keep_alive": "10m",
@@ -119,7 +122,7 @@ async def main() -> None:
         await run_model(m, reg, reps)
     # Reload the configured model so the running voicebot stays fast.
     async with httpx.AsyncClient(timeout=120) as client:
-        await client.post("http://localhost:11434/api/generate", json={"model": cfg.llm_model, "prompt": "", "keep_alive": -1})
+        await client.post(f"{OLLAMA}/api/generate", json={"model": cfg.llm_model, "prompt": "", "keep_alive": -1})
 
 
 if __name__ == "__main__":

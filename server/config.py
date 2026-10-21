@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import os
+import platform
+import sys
 from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# MLX (Parakeet/Whisper on the GPU, Ollama's NVFP4 models) only exists on Apple Silicon.
+IS_APPLE_SILICON = sys.platform == "darwin" and platform.machine() == "arm64"
+
+STT_MODELS = {"mlx": "mlx-community/parakeet-tdt-0.6b-v3", "onnx": "nemo-parakeet-tdt-0.6b-v3"}
 
 
 def _env(key: str, default: str) -> str:
@@ -28,6 +35,26 @@ def _env_bool(key: str, default: bool) -> bool:
 
 def _env_list(key: str, default: str) -> list[str]:
     return [x.strip() for x in _env(key, default).split(",") if x.strip()]
+
+
+def resolve_stt_backend(value: str, apple_silicon: bool = IS_APPLE_SILICON) -> str:
+    """STT_BACKEND "auto" -> "mlx" on Apple Silicon, "onnx" elsewhere."""
+    value = value.lower()
+    if value in ("mlx", "onnx"):
+        return value
+    if value not in ("", "auto"):
+        raise ValueError(f"STT_BACKEND={value!r}: expected auto, mlx or onnx")
+    return "mlx" if apple_silicon else "onnx"
+
+
+def default_llm_model(apple_silicon: bool = IS_APPLE_SILICON) -> str:
+    # NVFP4 needs Ollama's MLX engine (macOS only); elsewhere the GGUF build of the same model.
+    return "qwen3.6:35b-a3b-nvfp4" if apple_silicon else "qwen3.6:35b-a3b"
+
+
+def default_stt_threads() -> int:
+    # Leave cores to Ollama, which may be prefilling on the CPU while we transcribe.
+    return min(4, max(1, (os.cpu_count() or 2) // 2))
 
 
 # The 25 European languages Parakeet TDT v3 transcribes.
@@ -66,7 +93,11 @@ class Config:
     provider_fallback: bool = field(default_factory=lambda: _env_bool("PROVIDER_FALLBACK", True))
 
     # STT
-    stt_model: str = field(default_factory=lambda: _env("STT_MODEL", "mlx-community/parakeet-tdt-0.6b-v3"))
+    # Local Parakeet engine: "mlx" (Apple Silicon GPU) or "onnx" (onnxruntime CPU, any OS); "auto" picks
+    stt_backend: str = field(default_factory=lambda: resolve_stt_backend(_env("STT_BACKEND", "auto")))
+    stt_model: str = ""  # STT_MODEL, default per backend (STT_MODELS)
+    stt_onnx_quant: str = field(default_factory=lambda: _env("STT_ONNX_QUANT", "int8"))  # "" = fp32
+    stt_threads: int = field(default_factory=lambda: _env_int("STT_THREADS", 0) or default_stt_threads())
     whisper_model: str = field(default_factory=lambda: _env("WHISPER_MODEL", "mlx-community/whisper-large-v3-turbo"))
     min_utterance_ms: int = field(default_factory=lambda: _env_int("MIN_UTTERANCE_MS", 200))
 
@@ -78,8 +109,8 @@ class Config:
     langid_min_margin: float = field(default_factory=lambda: _env_float("LANGID_MIN_MARGIN", 0.3))
 
     # LLM (Ollama, OpenAI-compatible)
-    llm_base_url: str = field(default_factory=lambda: _env("LLM_BASE_URL", "http://localhost:11434"))
-    llm_model: str = field(default_factory=lambda: _env("LLM_MODEL", "qwen3.6:35b-a3b-nvfp4"))
+    llm_base_url: str = field(default_factory=lambda: _env("LLM_BASE_URL", "http://127.0.0.1:11434"))
+    llm_model: str = field(default_factory=lambda: _env("LLM_MODEL", default_llm_model()))
     llm_api_key: str = field(default_factory=lambda: _env("LLM_API_KEY", "ollama"))
     llm_max_tokens: int = field(default_factory=lambda: _env_int("LLM_MAX_TOKENS", 300))
     llm_empty_retries: int = field(default_factory=lambda: _env_int("LLM_EMPTY_RETRIES", 2))
@@ -124,7 +155,7 @@ class Config:
     ha_url: str = field(default_factory=lambda: _env("HA_URL", "http://homeassistant.local:8123"))
     ha_token: str = field(default_factory=lambda: _env("HA_TOKEN", ""))
     # Where home commands go: "ha" (local tools), "google" (Google Assistant cloud only, works away from home),
-    # "auto" (local when HOME_PROBE answers, i.e. the Mac is on the home network; Google otherwise)
+    # "auto" (local when HOME_PROBE answers, i.e. this computer is on the home network; Google otherwise)
     home_route: str = field(default_factory=lambda: _env("HOME_ROUTE", "ha"))
     home_probe: str = field(default_factory=lambda: _env("HOME_PROBE", ""))  # host:port on the home LAN
     home_probe_ttl_s: float = field(default_factory=lambda: _env_float("HOME_PROBE_TTL_S", 30.0))
@@ -175,6 +206,9 @@ class Config:
     stats_enabled: bool = field(default_factory=lambda: _env_bool("STATS_ENABLED", True))
     stats_db: str = field(default_factory=lambda: _env("STATS_DB", "data/stats.db"))
     stats_retention_days: float = field(default_factory=lambda: _env_float("STATS_RETENTION_DAYS", 90.0))
+
+    def __post_init__(self) -> None:
+        self.stt_model = self.stt_model or _env("STT_MODEL", "") or STT_MODELS[self.stt_backend]
 
 
 cfg = Config()

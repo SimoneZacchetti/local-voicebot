@@ -42,11 +42,9 @@ def synth(models: dict, lang: str, voice: str, text: str) -> np.ndarray:
 
 
 async def main(url: str) -> None:
-    import mlx.core as mx
-    from parakeet_mlx import from_pretrained
-    from parakeet_mlx.audio import get_logmel
+    from server.stt import make_local_stt
 
-    stt = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
+    stt = make_local_stt()
     models: dict = {}
     async with websockets.connect(url, max_size=None) as ws:
         ready = json.loads(await ws.recv())
@@ -82,7 +80,7 @@ async def main(url: str) -> None:
             if not audio:
                 continue
             reply = np.concatenate(audio).astype(np.float32) / 32768
-            heard = stt.generate(get_logmel(mx.array(resample_poly(reply, 2, 3).astype(np.float32)), stt.preprocessor_config))[0].text
+            heard = stt._transcribe(resample_poly(reply, 2, 3).astype(np.float32)).text
             print(f"\nQ[{transcript['lang']}] {transcript['text']}")
             print(f"A (heard back) {heard}")
             print(f"  client first audio {first_audio * 1000:.0f} ms | server {metrics} | reply {len(reply) / 24000:.1f}s")

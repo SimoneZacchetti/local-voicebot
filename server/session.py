@@ -153,7 +153,7 @@ class Session:
     def _resume_history(self) -> int:
         """Continue this client's conversation if it reconnected recently. Returns its turns."""
         saved = self.svc.histories.pop(self.client_id, None) if self.client_id else None
-        if saved is None or time.monotonic() - saved.saved_at > cfg.client_history_ttl_s:
+        if saved is None or time.monotonic() - saved.saved_at >= cfg.client_history_ttl_s:
             return 0
         self.history, self.lang = saved.history, saved.lang
         self.greeted = True  # mid-conversation: no greeting
@@ -165,7 +165,7 @@ class Session:
         # A pending confirmation is never carried over: after a reconnect the bot asks again.
         self.svc.histories[self.client_id] = SavedHistory(list(self.history), self.lang, time.monotonic())
         now = time.monotonic()
-        stale = [k for k, v in self.svc.histories.items() if now - v.saved_at > cfg.client_history_ttl_s]
+        stale = [k for k, v in self.svc.histories.items() if now - v.saved_at >= cfg.client_history_ttl_s]
         for k in stale:
             del self.svc.histories[k]
         while len(self.svc.histories) > MAX_SAVED_HISTORIES:
@@ -441,7 +441,7 @@ class Session:
 
         llm = self.svc.llm
         tools = self.svc.tools
-        if await tools.update_route():  # the Mac left or reached the home network
+        if await tools.update_route():  # this computer left or reached the home network
             llm.set_tools(tools.specs)
             set_home_context(tools.context)
         messages = build_messages(
@@ -610,7 +610,7 @@ class Session:
         """Answer to "are you sure?": "sì" runs the action, "no" cancels, anything else is
         a new request (and the pending action is dropped). No LLM involved."""
         p, self.pending = self.pending, None
-        if not p.asked or time.monotonic() > p.expires_at or turn.user_text is None:
+        if not p.asked or time.monotonic() >= p.expires_at or turn.user_text is None:
             return False
         verdict = yes_no(turn.user_text)
         if verdict is None:

@@ -1,4 +1,8 @@
-"""Speech-to-text providers: Parakeet (MLX, default), mlx-whisper, Groq Whisper."""
+"""Speech-to-text providers: Parakeet (local, default), mlx-whisper, Groq Whisper.
+
+Local Parakeet TDT v3 runs on MLX on Apple Silicon and on onnxruntime (CPU) elsewhere, e.g. Windows
+(STT_BACKEND). Engine imports are lazy, so the server imports without either installed.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import cfg
+from .config import IS_APPLE_SILICON, STT_MODELS, cfg
 from .langid import to_iso
 from .workers import STT_EXEC, run_in
 
@@ -68,6 +72,58 @@ class ParakeetStt:
     async def tick(self) -> None:
         """Tiny inference to bring the GPU out of idle before the real utterance arrives."""
         await run_in(STT_EXEC, self._transcribe, np.zeros(SAMPLE_RATE // 2, dtype=np.float32))
+
+
+class ParakeetOnnxStt:
+    """Same model through onnx-asr on onnxruntime's CPU provider: no GPU needed, any OS."""
+
+    name = "parakeet"
+    MIN_SAMPLES = SAMPLE_RATE // 10  # onnxruntime fails on (near-)empty input
+
+    def __init__(self, model_id: str) -> None:
+        if model_id == STT_MODELS["mlx"]:
+            model_id = STT_MODELS["onnx"]
+        elif model_id.startswith("mlx-community/"):
+            log.warning("STT_MODEL=%s is an MLX model, onnx-asr probably cannot load it", model_id)
+        self.model_id = model_id
+        self.model = None
+
+    def _load(self) -> None:
+        if self.model is None:
+            import onnx_asr
+            import onnxruntime as rt
+
+            opts = rt.SessionOptions()
+            opts.intra_op_num_threads = cfg.stt_threads
+            # Explicit CPU provider: the default list would pick CoreML/DirectML/CUDA when present.
+            self.model = onnx_asr.load_model(self.model_id, quantization=cfg.stt_onnx_quant or None,
+                                             sess_options=opts, providers=["CPUExecutionProvider"])
+
+    def _transcribe(self, pcm: np.ndarray) -> Transcript:
+        self._load()
+        if len(pcm) < self.MIN_SAMPLES:
+            return Transcript("", provider=self.name)
+        return Transcript(self.model.recognize(pcm.astype(np.float32), sample_rate=SAMPLE_RATE).strip(),
+                          provider=self.name)
+
+    def _warmup(self) -> None:
+        self._load()
+        rng = np.random.default_rng(0)
+        for seconds in (1, 3, 6):
+            self._transcribe((rng.standard_normal(SAMPLE_RATE * seconds) * 0.05).astype(np.float32))
+
+    async def warmup(self) -> None:
+        await run_in(STT_EXEC, self._warmup)
+
+    async def transcribe(self, pcm: np.ndarray) -> Transcript:
+        return await run_in(STT_EXEC, self._transcribe, pcm)
+
+    async def tick(self) -> None:
+        """No GPU to wake on the CPU provider (and silence decodes to a hallucinated "Yeah.")."""
+
+
+def make_local_stt() -> ParakeetStt | ParakeetOnnxStt:
+    return (ParakeetStt if cfg.stt_backend == "mlx" else ParakeetOnnxStt)(cfg.stt_model)
 
 
 class WhisperMlxStt:
@@ -143,9 +199,12 @@ class SttRouter:
     """Primary provider with automatic fallback to local Parakeet (e.g. Groq 429)."""
 
     def __init__(self) -> None:
-        self.local = ParakeetStt(cfg.stt_model)
+        self.local = make_local_stt()
         if cfg.stt_provider == "groq" and cfg.groq_api_key:
             self.primary = GroqStt()
+        elif cfg.stt_provider == "whisper-mlx" and not IS_APPLE_SILICON:
+            log.warning("STT_PROVIDER=whisper-mlx needs Apple Silicon, using local parakeet")
+            self.primary = self.local
         elif cfg.stt_provider == "whisper-mlx":
             self.primary = WhisperMlxStt(cfg.whisper_model)
         else:

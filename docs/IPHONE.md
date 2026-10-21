@@ -2,23 +2,25 @@
 
 Use the voicebot from your phone, at home and away:
 
-- **"Home" app** on the Home Screen: voice and chat, just like on the Mac.
+- **"Home" app** on the Home Screen: voice and chat, just like on the computer.
 - **Siri, widgets, Control Center and the Action button**: one command at a time, even with the phone locked.
 
-The Mac stays the "brain": it must be on and awake. The phone reaches it through **Tailscale**, an encrypted private network. No ports are opened on the router and nothing is exposed to the internet.
+The computer (Mac or Windows PC) stays the "brain": it must be on and awake. The phone reaches it through **Tailscale**, an encrypted private network. No ports are opened on the router and nothing is exposed to the internet.
 
 ```
-iPhone ──Tailscale──► https://<mac>.<tailnet>.ts.net:9443 ──► Mac 127.0.0.1:8001 ("phone" port)
-                                                              Mac 127.0.0.1:8000 (Mac browser)
+iPhone ──Tailscale──► https://<host>.<tailnet>.ts.net:9443 ──► computer 127.0.0.1:8001 ("phone" port)
+                                                               computer 127.0.0.1:8000 (local browser)
 ```
 
 ## 1. Setup (one time)
 
 ### Tailscale
 
-1. **Mac**: install the *Standalone* version from <https://pkgs.tailscale.com/stable/#macos>, log in and enable the CLI (menu bar icon → *Settings* → *CLI integration*).
+1. **Computer**:
+   - **Mac**: install the *Standalone* version from <https://pkgs.tailscale.com/stable/#macos>, log in and enable the CLI (menu bar icon → *Settings* → *CLI integration*).
+   - **Windows**: `winget install -e --id Tailscale.Tailscale`, then log in from the tray icon. The `tailscale` command works in a new terminal; if it doesn't, use the full path `& "C:\Program Files\Tailscale\tailscale.exe"`.
 2. **iPhone**: install the [Tailscale](https://apps.apple.com/app/tailscale/id1470499037) app, log in with **the same account** and turn on **VPN On Demand**.
-3. Give the Mac a neutral name, only inside Tailscale. The name ends up in the public HTTPS certificate log. The Mac's name in macOS does not change.
+3. Give the computer a neutral name, only inside Tailscale. The name ends up in the public HTTPS certificate log. The computer's own name does not change.
 
    ```bash
    tailscale set --hostname=voicebot-mac
@@ -44,9 +46,13 @@ iPhone ──Tailscale──► https://<mac>.<tailnet>.ts.net:9443 ──► Ma
    API_TOKENS=<generated token>
    ```
 
-   Then run `chmod 600 .env`.
+   Then make `.env` readable only by you. Mac: `chmod 600 .env`. Windows (PowerShell):
 
-3. Start the server with both ports:
+   ```powershell
+   icacls .env /inheritance:r /grant:r "*$([Security.Principal.WindowsIdentity]::GetCurrent().User.Value):(M)"
+   ```
+
+3. Start the server with both ports (`./start.sh` or `.\start.cmd` work too):
 
    ```bash
    uv run python -m server
@@ -58,9 +64,15 @@ iPhone ──Tailscale──► https://<mac>.<tailnet>.ts.net:9443 ──► Ma
    tailscale serve --bg --https=9443 8001
    ```
 
-   Port 9443 is used because 443 may already be taken on the Mac (for example by Docker's Traefik). If your 443 is free, use `tailscale serve --bg 8001` and remove `:9443` from `PUBLIC_HOST`.
+   Port 9443 is used because 443 may already be taken on the computer (for example by Docker's Traefik). If your 443 is free, use `tailscale serve --bg 8001` and remove `:9443` from `PUBLIC_HOST`.
 
-5. Run `uv run python scripts/check_env.py`. Everything must be `OK`: `.env` untracked with 600 permissions, `tailscale serve` publishing only `127.0.0.1:8001`, funnel off.
+5. Run `uv run python scripts/check_env.py`. Everything must be `OK`: `.env` untracked and readable only by you, `tailscale serve` publishing only `127.0.0.1:8001`, funnel off.
+
+6. **Windows only**: keep the PC awake while it is plugged in, or the phone can't reach it:
+
+   ```powershell
+   powercfg /change standby-timeout-ac 0
+   ```
 
 > **Never** `tailscale funnel`, never `HOST=0.0.0.0`, never port forwarding on the router: the server controls the house.
 
@@ -77,7 +89,7 @@ What to expect:
 - **Calls and Siri**: they interrupt the audio. **"Tap to resume"** appears.
 - **Chat**: the speech bubble icon at the top opens the chat, which works without the microphone.
 - **Echo**: with the phone speaker at high volume, part of the bot's voice can leak back into the microphone. The bot almost always recognizes it. With AirPods or headphones the problem goes away.
-- **Mac off or Tailscale disabled**: the app shows "Mac unreachable".
+- **Computer off or Tailscale disabled**: the app shows "Server unreachable".
 
 ## 3. Siri and Shortcuts
 
@@ -128,7 +140,7 @@ A shortcut without dictation, with a fixed `text`, for example `turn off all the
 | `needs_confirmation` | Only with `API_ALLOW_RISKY=true`: a confirmation is required (see below). |
 | `error` | Empty message or server error. |
 
-If the Mac is unreachable, **Get Contents of URL** fails and Shortcuts shows an error.
+If the computer is unreachable, **Get Contents of URL** fails and Shortcuts shows an error.
 
 ### Locks and doors from Siri (not recommended)
 
@@ -154,7 +166,7 @@ They are refused by default. To enable them:
 - **Tokens**: `API_TOKENS` holds one token per device, so you can revoke just one.
   - The token is stored in plain text inside the shortcut and syncs via iCloud: **don't share** that shortcut.
   - The server never writes tokens to the logs.
-- **Mac browser**: on the local port, `/ws` only accepts pages from `127.0.0.1` and `localhost`, so any random site open in Chrome cannot control the house.
+- **Local browser**: on the local port, `/ws` only accepts pages from `127.0.0.1` and `localhost`, so any random site open in Chrome cannot control the house.
 
 ### Lost phone
 
@@ -165,11 +177,11 @@ They are refused by default. To enable them:
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| "Mac unreachable" | Mac asleep, server stopped or Tailscale off | Wake the Mac, `uv run python -m server`, check Tailscale on Mac and iPhone. |
+| "Server unreachable" | Computer asleep, server stopped or Tailscale off | Wake the computer, start the server (`./start.sh`, `.\start.cmd` or `uv run python -m server`), check Tailscale on the computer and the iPhone. On Windows, `powercfg /change standby-timeout-ac 0` stops the PC from sleeping. |
 | The page won't open | `tailscale serve` not active | `tailscale serve status`. If empty, `tailscale serve --bg --https=9443 8001`. |
 | 403 | Login not allowed or wrong `PUBLIC_HOST` | Compare `TS_ALLOWED_LOGINS` and `PUBLIC_HOST` with `tailscale status`. The server log gives the reason (`refused … login/host/origin`). |
-| Invalid certificate | The Mac's 443 is taken by another program | Use `--https=9443` and `PUBLIC_HOST=…:9443`. |
-| Siri reports an error | Wrong token (401) or Mac unreachable | Check the `Authorization: Bearer …` header. |
-| Slow first reply | After inactivity, macOS moved the model to disk | The bot reloads it when the phone connects. Freeing RAM (Docker, heavy apps) helps. |
+| Invalid certificate | The computer's 443 is taken by another program | Use `--https=9443` and `PUBLIC_HOST=…:9443`. |
+| Siri reports an error | Wrong token (401) or computer unreachable | Check the `Authorization: Bearer …` header. |
+| Slow first reply | After inactivity, the OS moved the model to disk | The bot reloads it when the phone connects. Freeing RAM (Docker, heavy apps) helps. |
 | The bot interrupts itself | Speaker echo | Lower the volume or use headphones. |
 | Home commands ignored away from home | The Google route is not active | `HOME_ROUTE=auto` with `HOME_PROBE`, see [GUIDE.md](GUIDE.md#home-control-while-away-google-assistant). |

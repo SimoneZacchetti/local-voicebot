@@ -42,6 +42,9 @@ class FakeLlm:
     def __init__(self, delay=0.05):
         self.delay = delay
         self.calls = []
+        # Set by a test to hold the first reply after its first sentence, until the turn is interrupted. Sleeps shorter
+        # than the clock resolution (15.6 ms on Windows) return at once, so delays alone cannot keep a reply going.
+        self.hold: asyncio.Event | None = None
 
     async def warmup(self):
         pass
@@ -54,7 +57,9 @@ class FakeLlm:
 
     async def stream(self, messages):
         self.calls.append(messages)
-        for sentence in REPLY:
+        for i, sentence in enumerate(REPLY):
+            if i and self.hold is not None and len(self.calls) == 1:
+                await asyncio.wait_for(self.hold.wait(), 5)
             for word in sentence.split(" "):
                 await asyncio.sleep(self.delay / 5)
                 yield word + " "
@@ -365,6 +370,7 @@ def test_typed_message_in_voice_session_is_spoken(client):
 
 
 def test_typed_message_interrupts_without_merging(client):
+    client.llm.hold = asyncio.Event()  # never set: the first reply stops after one sentence
     with client.websocket_connect("/ws") as ws:
         recv(ws)
         ws.send_text(text_msg("raccontami della Toscana"))
