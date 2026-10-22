@@ -5,7 +5,7 @@
 - Places for a position: OpenStreetMap Nominatim (reverse geocoding, cached).
 - News: one RSS feed per language (NEWS_FEED_<LANG>).
 
-Positions are rounded to about 1 km before they leave this computer. Every answer is
+Positions are rounded to 0.1° (about 10 km) before they leave this computer. Every answer is
 compact JSON for the LLM, which turns it into a short spoken reply.
 """
 
@@ -114,7 +114,9 @@ class Place:
 
     @property
     def key(self) -> tuple[float, float]:
-        return round(self.lat, 2), round(self.lon, 2)  # ~1 km: the precision that leaves this computer
+        # 0.1° (~11 km north-south, ~8 km east-west in Italy): the only precision that leaves this computer.
+        # Enough for the weather and the town name, not for finding a house.
+        return round(self.lat, 1), round(self.lon, 1)
 
 
 def fold(text: str) -> str:

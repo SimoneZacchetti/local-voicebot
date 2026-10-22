@@ -109,7 +109,7 @@ async def test_weather_for_a_named_place(web):
     assert res["ok"] and res["place"] == "Roma, Lazio, Italia"
     assert len(res["days"]) == 3 and res["days"][2]["sky"] == "thunderstorm"
     fc = next(r for r in web.requests if r.url.host == "api.open-meteo.com")
-    assert (fc.url.params["latitude"], fc.url.params["longitude"]) == ("41.89", "12.51")  # rounded to ~1 km
+    assert (fc.url.params["latitude"], fc.url.params["longitude"]) == ("41.9", "12.5")  # rounded to 0.1°, ~10 km
     assert "note" not in res
 
 
@@ -119,6 +119,9 @@ async def test_weather_here_uses_the_device_position(web):
     assert "ipwho.is" not in web.hosts()
     for r in web.requests:  # the exact position never leaves this computer
         assert "45.464211" not in str(r.url) and "9.189982" not in str(r.url)
+        if "lat" in r.url.params or "latitude" in r.url.params:
+            assert {r.url.params.get("lat", r.url.params.get("latitude")),
+                    r.url.params.get("lon", r.url.params.get("longitude"))} == {"45.5", "9.2"}
 
 
 async def test_weather_without_a_position_falls_back_to_the_ip(web):

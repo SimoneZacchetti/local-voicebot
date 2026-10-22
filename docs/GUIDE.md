@@ -84,7 +84,7 @@ Ask "che tempo fa qui?", "piove domani?", "che tempo farà sabato a Roma?", "wha
   1. The position of the browser. After "Start talking" or your first chat message, Chrome asks once for permission. On the iPhone app it is the phone's position, so it follows you away from home.
   2. `WEATHER_LOCATION` from `.env`: a city (`Milano`) or `lat,lon`.
   3. The location of your public IP. This is approximate, and wrong behind a VPN or a corporate network; the bot then names the city, so you notice.
-- **Privacy**: the position is rounded to about 1 km before it leaves the computer. It goes to Open-Meteo, and to OpenStreetMap [Nominatim](https://nominatim.org) to get the town name. Without a browser position, the IP lookup goes to [ipwho.is](https://ipwho.is) (fallback [ipapi.co](https://ipapi.co)).
+- **Privacy**: the position is rounded to 0.1° (about 10 km) before it leaves the computer. It goes to Open-Meteo, and to OpenStreetMap [Nominatim](https://nominatim.org) to get the town name. Without a browser position, the IP lookup goes to [ipwho.is](https://ipwho.is) (fallback [ipapi.co](https://ipapi.co)).
 - **News**: the RSS feed of the language you are speaking: ANSA (it), BBC (en), France 24 (fr), tagesschau (de), El País (es), RTP (pt), NOS (nl). Other languages get the English one. Replace one with `NEWS_FEED_<LANG>`, e.g. `NEWS_FEED_IT=https://www.ansa.it/sito/notizie/sport/sport_rss.xml`. A topic ("notizie di sport") filters the headlines of that feed; general feeds have few sport headlines.
 - **Results are cached**: 10 minutes for the weather, 15 for the news. A follow-up question costs nothing.
 
