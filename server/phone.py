@@ -113,6 +113,7 @@ class PhoneSessions:
             "reply": " ".join(turn.sentences),
             "session_id": sid,
             "actions": turn.actions,
+            "cards": turn.cards,  # weather/news data, e.g. for a widget
             "route": self.svc.tools.mode,
         }
         p = s.pending

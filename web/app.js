@@ -192,6 +192,83 @@ function renderBot(turn) {
   }
 }
 
+// ---------------------------------------------------------------- cards (weather, news)
+
+// WMO weather codes -> icon by day, icon by night (when different).
+const WX_ICONS = [
+  [[0], "☀️", "🌙"], [[1], "🌤️", "🌙"], [[2], "⛅", "☁️"], [[3], "☁️"], [[45, 48], "🌫️"],
+  [[51, 53, 55, 56, 57, 80, 81, 82], "🌦️"], [[61, 63, 65, 66, 67], "🌧️"], [[71, 73, 75, 77, 85, 86], "🌨️"],
+  [[95, 96, 99], "⛈️"],
+];
+const wxIcon = (code, day = 1) => {
+  const row = WX_ICONS.find(([codes]) => codes.includes(code));
+  return row ? (!day && row[2]) || row[1] : "🌡️";
+};
+const deg = (x) => (x === null || x === undefined ? "–" : `${x}°`);
+const webLink = (u) => (typeof u === "string" && /^https?:\/\//.test(u) ? u : null);
+
+function weatherCard(c, lang) {
+  let weekday = (d) => d;
+  let today = "Today";
+  try {
+    const fmt = new Intl.DateTimeFormat(lang, { weekday: "short" });
+    weekday = (d) => fmt.format(new Date(`${d}T12:00`));
+    const t = new Intl.RelativeTimeFormat(lang, { numeric: "auto" }).format(0, "day");
+    today = t[0].toUpperCase() + t.slice(1);
+  } catch {
+    // unknown language tag: English labels
+  }
+  const lo = Math.min(...c.days.map((d) => d.min));
+  const span = Math.max(1, Math.max(...c.days.map((d) => d.max)) - lo);
+  const n = c.now;
+  const hours = c.hours.map((h) => `<div class="wx-hour"><span>${esc(h.time)}</span>`
+    + `<span class="wx-ico">${wxIcon(h.code, h.day)}</span><b>${deg(h.temp)}</b>`
+    + `<small>${h.rain ? `${h.rain}%` : "&nbsp;"}</small></div>`).join("");
+  const days = c.days.map((d, i) => `<div class="wx-day"><span class="wx-wd">${esc(i ? weekday(d.date) : today)}</span>`
+    + `<span class="wx-ico" title="${esc(d.sky)}">${wxIcon(d.code)}</span>`
+    + `<small class="wx-rain">${d.rain ? `${d.rain}%` : ""}</small><span class="wx-min">${deg(d.min)}</span>`
+    + `<span class="wx-bar"><i style="left:${((d.min - lo) / span) * 100}%;right:${((lo + span - d.max) / span) * 100}%"></i></span>`
+    + `<span>${deg(d.max)}</span></div>`).join("");
+  return `<div class="card-head"><span class="card-title">${esc(c.place || "Your position")}</span>`
+    + `${c.approximate ? '<span class="card-note" title="Estimated from the internet connection">approx.</span>' : ""}</div>`
+    + `<div class="wx-now"><span class="wx-big">${wxIcon(n.code, n.day)}</span><span class="wx-temp">${deg(n.temp)}</span>`
+    + `<span class="wx-meta">${esc(n.sky)}<br>feels ${deg(n.feels)} · wind ${n.wind ?? "–"} km/h</span></div>`
+    + `<div class="wx-hours">${hours}</div><div class="wx-days">${days}</div>`;
+}
+
+function newsCard(c) {
+  const items = c.items.map((i) => {
+    const link = webLink(i.link);
+    const img = webLink(i.image);
+    const body = `${img ? `<img src="${esc(img)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}`
+      + `<span><b>${esc(i.title)}</b>${i.summary ? `<small>${esc(i.summary)}</small>` : ""}</span>`;
+    return link
+      ? `<a class="news-item" href="${esc(link)}" target="_blank" rel="noopener noreferrer">${body}</a>`
+      : `<div class="news-item">${body}</div>`;
+  }).join("");
+  return `<div class="card-head"><span class="card-title">${esc(c.source || "News")}</span></div><div class="news">${items}</div>`;
+}
+
+// Shown over the orb while it is relevant (until the next turn or ✕), and kept in the history.
+function showCard(card, turn) {
+  const lang = turnState(turn).lang || navigator.language;
+  const html = card.kind === "weather" ? weatherCard(card, lang) : card.kind === "news" ? newsCard(card) : "";
+  if (!html) return;
+  const el = $("card");
+  el.innerHTML = `<button class="card-close icon-btn" aria-label="Close">`
+    + `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button>${html}`;
+  el.hidden = false;
+  el.scrollTop = 0;
+  document.body.classList.add("has-card");
+  addMsg("card", html);
+}
+
+function hideCard() {
+  $("card").hidden = true;
+  $("card").innerHTML = "";
+  document.body.classList.remove("has-card");
+}
+
 // ---------------------------------------------------------------- playback
 
 function botActive() {
@@ -469,6 +546,7 @@ function onControl(m) {
     }
     case "turn_start": {
       $("confirm").hidden = true;
+      hideCard(); // the next answer brings its own, if any
       // A new reply starts: anything still playing from the previous turn is obsolete.
       const prev = turns.get(currentTurn);
       if (prev && botActive() && prev.text) {
@@ -545,6 +623,9 @@ function onControl(m) {
       setState("thinking", "Working on it…");
       break;
     }
+    case "card":
+      if (m.turn === currentTurn) showCard(m.card, m.turn);
+      break;
     case "confirm":
       $("confirm").hidden = false;
       $("status").textContent = m.action;
@@ -553,6 +634,7 @@ function onControl(m) {
       notice(m.fallback ? `${m.stage}: ${m.msg} → using ${m.fallback}` : `Error ${m.stage}: ${m.msg}`, true);
       break;
     case "reset_done":
+      hideCard();
       $("log").innerHTML = "";
       $("cap-user").textContent = $("cap-bot").textContent = "";
       notice("New conversation");
@@ -746,6 +828,7 @@ $("mute").addEventListener("click", () => setMuted(!muted));
 $("history-btn").addEventListener("click", () => toggleDrawer());
 $("drawer-close").addEventListener("click", () => toggleDrawer(false));
 $("scrim").addEventListener("click", () => toggleDrawer(false));
+$("card").addEventListener("click", (e) => e.target.closest(".card-close") && hideCard());
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") toggleDrawer(false);
   if (e.code === "Space" && e.target === document.body && running) {

@@ -7,7 +7,8 @@ Wire protocol (see README for the full table):
 - everything else is JSON text messages. Typed chat: ``{"type": "text", "text", "heard_turn",
   "heard_seq", "playing"}``; replies are spoken only while voice is on (``hello`` or mic audio turn
   it on, ``{"type": "voice", "on": false}`` turns it off). ``{"type": "location", "lat", "lon"}``: where
-  the user is (browser geolocation), for the weather tool.
+  the user is (browser geolocation), for the weather tool. Server -> client ``{"type": "card", "turn", "card"}``:
+  weather or news to show on screen (``card.kind``), from a tool result the LLM gets without it.
 """
 
 from __future__ import annotations
@@ -90,6 +91,7 @@ class Turn:
     task: asyncio.Task | None = None
     first_audio_at: float | None = None  # perf_counter when the first audio left the server
     actions: list[str] = field(default_factory=list)  # tool actions executed in this turn
+    cards: list[dict] = field(default_factory=list)  # weather/news shown on screen (never sent to the LLM)
     hist_start: int = 0  # index of this turn's user message in history
     tools_started: bool = False  # a tool was sent to the house (maybe still running)
     superseded: bool = False  # a newer turn replaced this one: it must not act any more
@@ -612,6 +614,9 @@ class Session:
             res = await asyncio.wait_for(self.svc.tools.execute(call, turn.lang, self.position), cfg.tool_timeout_s)
         except Exception as e:  # noqa: BLE001 - timeout or transport error
             res = {"ok": False, "error": type(e).__name__}
+        if (card := res.pop("card", None)) is not None and self.current is turn:
+            turn.cards.append(card)
+            self.send({"type": "card", "turn": turn.id, "card": card})
         if res.get("ok") and self.svc.tools.is_action(call.name):
             turn.actions.append(self.svc.tools.summary(call))
         log.info("tool turn=%d %s %s -> %s (%.0f ms)", turn.id, call.name, call.args,

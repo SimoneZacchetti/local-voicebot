@@ -28,7 +28,7 @@ player ◄────────────── PCM16 ────  sentenc
 - ✋ **Barge-in**: talk over it and it stops, remembering only what you actually heard
 - 🌍 **7 languages with a local voice** (it, en, fr, de, es, pt, nl), detected automatically
 - 💬 **Text chat** in the same conversation as the voice
-- 🌦️ **Weather and news**: "what's the weather here?", "will it rain in Rome on Saturday?", "latest news". Free services, no API key; the only default feature that uses the internet (`INFO_TOOLS=` turns it off) ([docs/GUIDE.md](docs/GUIDE.md#weather-and-news))
+- 🌦️ **Weather and news**: "what's the weather here?", "will it rain in Rome on Saturday?", "latest news", with a forecast or headline card on screen. Free services, no API key; the only default feature that uses the internet (`INFO_TOOLS=` turns it off) ([docs/GUIDE.md](docs/GUIDE.md#weather-and-news))
 - 🏠 **Smart home** via Home Assistant MCP, with spoken confirmation for locks and alarms
 - 🌐 **Away from home too** via Google Assistant, or Tailscale if Home Assistant stays at home
 - 📱 **From your iPhone**: home-screen app, Siri and widgets, via Tailscale ([docs/IPHONE.md](docs/IPHONE.md))

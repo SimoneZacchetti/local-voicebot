@@ -6,7 +6,8 @@
 - News: one RSS feed per language (NEWS_FEED_<LANG>).
 
 Positions are rounded to 0.1° (about 10 km) before they leave this computer. Every answer is
-compact JSON for the LLM, which turns it into a short spoken reply.
+compact JSON for the LLM, which turns it into a short spoken reply, plus a "card" for the
+screen (forecast with icons, headlines with links and pictures) that the LLM never sees.
 """
 
 from __future__ import annotations
@@ -33,6 +34,9 @@ GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 IP_URLS = ("https://ipwho.is/", "https://ipapi.co/json/")
 MAX_FEED_BYTES = 2_000_000
+CARD_NEWS_ITEMS = 8
+MEDIA = "{http://search.yahoo.com/mrss/}"
+ATOM = "{http://www.w3.org/2005/Atom}"
 
 WEATHER_TOOL = {
     "type": "function",
@@ -269,7 +273,7 @@ class Info:
         if place.name is None:
             name_task = asyncio.ensure_future(self.place_name(place.lat, place.lon, lang))
         try:
-            fc = await self._cached(("wx", *place.key), 600, lambda: self._forecast(place))
+            raw = await self._cached(("wx", *place.key), 600, lambda: self._forecast(place))
             if name_task is not None:
                 try:
                     place.name = await asyncio.wait_for(name_task, 1.5)
@@ -281,18 +285,18 @@ class Info:
         out = {"ok": True, "place": place.name or "the user's current position"}
         if place.source == "ip":
             out["note"] = "position estimated from the internet connection: may be wrong, name the place"
-        return {**out, **fc}
+        card = {"kind": "weather", "place": place.name, "approximate": place.source == "ip", **weather_card(raw)}
+        return {**out, **summarize(raw), "card": card}
 
     async def _forecast(self, place: Place) -> dict:
-        j = await self._json(FORECAST_URL, {
+        return await self._json(FORECAST_URL, {
             "latitude": place.key[0], "longitude": place.key[1], "timezone": "auto",
             "forecast_days": 7,
-            "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation",
-            "hourly": "temperature_2m,precipitation_probability,weather_code",
+            "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation,is_day",
+            "hourly": "temperature_2m,precipitation_probability,weather_code,is_day",
             "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,"
                      "precipitation_sum,sunrise,sunset",
         })
-        return summarize(j)
 
     # -- news ---------------------------------------------------------------------------
 
@@ -320,7 +324,8 @@ class Info:
             if not hits:
                 out["note"] = f"no headline about {topic} right now: these are the top headlines"
             items = hits or items
-        out["headlines"] = items[: cfg.news_max_items]
+        out["headlines"] = [{"title": i["title"], "summary": i["summary"]} for i in items[: cfg.news_max_items]]
+        out["card"] = {"kind": "news", "source": source, "items": items[:CARD_NEWS_ITEMS]}
         return out
 
 
@@ -353,6 +358,27 @@ def summarize(j: dict) -> dict:
     return out
 
 
+def weather_card(j: dict) -> dict:
+    """Open-Meteo forecast -> what the screen shows: weather codes for the icons, every hour of the next day."""
+    cur = j.get("current") or {}
+    now_iso = str(cur.get("time", ""))
+    h = j.get("hourly") or {}
+    times = h.get("time") or []
+    start = next((i for i, t in enumerate(times) if t[:13] >= now_iso[:13]), len(times))
+    d = j.get("daily") or {}
+    return {
+        "now": {"temp": _r(cur.get("temperature_2m")), "feels": _r(cur.get("apparent_temperature")),
+                "code": cur.get("weather_code"), "sky": sky(cur.get("weather_code")), "day": cur.get("is_day", 1),
+                "wind": _r(cur.get("wind_speed_10m")), "precip": cur.get("precipitation")},
+        "hours": [{"time": times[i][11:16], "temp": _r(h["temperature_2m"][i]), "code": h["weather_code"][i],
+                   "day": (h.get("is_day") or [1] * len(times))[i], "rain": h["precipitation_probability"][i]}
+                  for i in range(start, min(start + 24, len(times)))],
+        "days": [{"date": t, "code": d["weather_code"][i], "sky": sky(d["weather_code"][i]),
+                  "min": _r(d["temperature_2m_min"][i]), "max": _r(d["temperature_2m_max"][i]),
+                  "rain": d["precipitation_probability_max"][i]} for i, t in enumerate(d.get("time") or [])],
+    }
+
+
 # -- feeds ---------------------------------------------------------------------------------
 
 _TAG = re.compile(r"<[^>]+>")
@@ -362,21 +388,39 @@ def clean(text: str | None) -> str:
     return re.sub(r"\s+", " ", html.unescape(_TAG.sub(" ", text or ""))).strip()
 
 
+def safe_url(url: str | None) -> str | None:
+    """Only plain web links reach the page (no javascript:, data: ...)."""
+    url = html.unescape((url or "").strip())
+    return url if re.match(r"https?://[^\s\"'<>]+$", url) and len(url) <= 2000 else None
+
+
+def _image(item: ET.Element) -> str | None:
+    """Picture of a feed item: media:thumbnail, media:content or an image enclosure."""
+    for el in (*item.iter(f"{MEDIA}thumbnail"), *item.iter(f"{MEDIA}content"), *item.iter("enclosure")):
+        kind = el.get("type") or el.get("medium") or "image"
+        if kind.startswith("image") and (url := safe_url(el.get("url"))):
+            return url
+    return None
+
+
 def parse_feed(xml: bytes | str) -> tuple[str, list[dict]]:
-    """RSS 2.0 (or Atom) -> (source title, [{title, summary}])."""
+    """RSS 2.0 (or Atom) -> (source title, [{title, summary, link, image}])."""
     root = ET.fromstring(xml)
-    atom = "{http://www.w3.org/2005/Atom}"
     channel = root.find("channel")
     if channel is not None:
         source = clean(channel.findtext("title"))
-        items = [(i.findtext("title"), i.findtext("description")) for i in channel.iter("item")]
+        items = [(i.findtext("title"), i.findtext("description"), i.findtext("link"), _image(i))
+                 for i in channel.iter("item")]
     else:
-        source = clean(root.findtext(f"{atom}title"))
-        items = [(e.findtext(f"{atom}title"), e.findtext(f"{atom}summary")) for e in root.iter(f"{atom}entry")]
+        source = clean(root.findtext(f"{ATOM}title"))
+        items = [(e.findtext(f"{ATOM}title"), e.findtext(f"{ATOM}summary"),
+                  getattr(e.find(f"{ATOM}link"), "attrib", {}).get("href"), _image(e))
+                 for e in root.iter(f"{ATOM}entry")]
     out = []
-    for title, summary in items:
+    for title, summary, link, image in items:
         title = clean(title)
         if title:
             summary = clean(summary)
-            out.append({"title": title, "summary": summary[:200] + ("…" if len(summary) > 200 else "")})
+            out.append({"title": title, "summary": summary[:200] + ("…" if len(summary) > 200 else ""),
+                        "link": safe_url(link), "image": image})
     return source, out

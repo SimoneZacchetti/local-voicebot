@@ -36,15 +36,18 @@ FORECAST = {
 }
 
 RSS = b"""<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"><channel><title>Primo piano ANSA - ANSA.it</title>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/"><channel><title>Primo piano ANSA - ANSA.it</title>
 <item><title><![CDATA[Ora solare, i consigli utili]]></title>
-  <description><![CDATA[ Dormire <b>meno</b> &egrave; diventata norma ]]></description></item>
-<item><title>Serie A, l'Inter vince il derby</title><description>Sport: 2 a 1 a San Siro</description></item>
+  <description><![CDATA[ Dormire <b>meno</b> &egrave; diventata norma ]]></description>
+  <link>https://www.ansa.it/ora-solare.html?a=1&amp;b=2</link>
+  <media:thumbnail url="https://img.ansa.it/ora.jpg" width="240"/></item>
+<item><title>Serie A, l'Inter vince il derby</title><description>Sport: 2 a 1 a San Siro</description>
+  <link>javascript:alert(1)</link><enclosure url="https://img.ansa.it/derby.mp4" type="video/mp4"/></item>
 <item><title></title><description>senza titolo</description></item>
 </channel></rss>"""
 
 ATOM = b"""<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Feed</title>
-<entry><title>Headline one</title><summary>Short &amp; sweet</summary></entry></feed>"""
+<entry><title>Headline one</title><summary>Short &amp; sweet</summary><link href="https://example.org/one"/></entry></feed>"""
 
 
 class Web:
@@ -108,6 +111,10 @@ async def test_weather_for_a_named_place(web):
     res = await web.info.weather({"location": "Roma"}, "it")
     assert res["ok"] and res["place"] == "Roma, Lazio, Italia"
     assert len(res["days"]) == 3 and res["days"][2]["sky"] == "thunderstorm"
+    card = res["card"]
+    assert card["kind"] == "weather" and card["place"] == "Roma, Lazio, Italia" and not card["approximate"]
+    assert card["now"]["code"] == 61 and len(card["hours"]) == 24 and card["hours"][0]["time"] == "10:00"
+    assert card["days"][2] == {"date": "2026-10-24", "code": 95, "sky": "thunderstorm", "min": 8, "max": 14, "rain": 90}
     fc = next(r for r in web.requests if r.url.host == "api.open-meteo.com")
     assert (fc.url.params["latitude"], fc.url.params["longitude"]) == ("41.9", "12.5")  # rounded to 0.1°, ~10 km
     assert "note" not in res
@@ -160,14 +167,19 @@ async def test_weather_errors_become_results(web):
 def test_parse_feed_cleans_cdata_and_html():
     source, items = parse_feed(RSS)
     assert source == "Primo piano ANSA - ANSA.it"
-    assert items[0] == {"title": "Ora solare, i consigli utili", "summary": "Dormire meno è diventata norma"}
+    assert items[0] == {"title": "Ora solare, i consigli utili", "summary": "Dormire meno è diventata norma",
+                        "link": "https://www.ansa.it/ora-solare.html?a=1&b=2", "image": "https://img.ansa.it/ora.jpg"}
+    assert items[1]["link"] is None and items[1]["image"] is None  # no javascript: links, no video as picture
     assert len(items) == 2  # no empty titles
-    assert parse_feed(ATOM) == ("Feed", [{"title": "Headline one", "summary": "Short & sweet"}])
+    assert parse_feed(ATOM) == ("Feed", [{"title": "Headline one", "summary": "Short & sweet",
+                                          "link": "https://example.org/one", "image": None}])
 
 
 async def test_news_in_the_user_language_with_topic(web):
     res = await web.info.news({}, "it")
     assert res["ok"] and res["source"].startswith("Primo piano ANSA") and len(res["headlines"]) == 2
+    assert set(res["headlines"][0]) == {"title", "summary"}  # links and pictures are for the screen only
+    assert res["card"]["kind"] == "news" and res["card"]["items"][0]["image"] == "https://img.ansa.it/ora.jpg"
     res = await web.info.news({"topic": "Sport"}, "it")
     assert [h["title"] for h in res["headlines"]] == ["Serie A, l'Inter vince il derby"] and "note" not in res
     res = await web.info.news({"topic": "Marte"}, "it")
@@ -293,6 +305,11 @@ def test_weather_here_in_a_chat(chat):
     assert [m["text"] for m in msgs if m["type"] == "sentence"] == ["A Milano ci sono 13 gradi."]
     tool = next(m for m in msgs if m["type"] == "tool")
     assert tool["calls"] == [{"name": "get_weather", "args": {}}]
+    card = next(m for m in msgs if m["type"] == "card")["card"]
+    assert card["kind"] == "weather" and card["place"] == "Milano"
+    # The screen gets the card, the LLM does not.
+    tool_msg = chat.sessions[0].svc.llm.calls[-1][-1]
+    assert tool_msg["role"] == "tool" and "card" not in json.loads(tool_msg["content"])
     assert "ipwho.is" not in chat.web.hosts()
 
 
@@ -304,6 +321,7 @@ def test_phone_command_with_position(chat, monkeypatch):
     body = r.json()
     assert body["status"] == "done" and body["reply"] == "A Milano ci sono 13 gradi."
     assert body["actions"] == []  # a lookup, not something done in the house
+    assert [c["kind"] for c in body["cards"]] == ["weather"]
     bad = chat.post("/api/command", json={"text": "che tempo fa?", "lat": 123, "lon": 9},
                     headers={"Authorization": f"Bearer {token}"})
     assert bad.status_code == 422
