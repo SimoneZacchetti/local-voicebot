@@ -1,10 +1,10 @@
-"""Compare LLMs on home-control tool calling with the real Home Assistant tools.
+"""Compare LLMs on tool calling with the real tools: Home Assistant, weather and news.
 
 For each model: empty replies (no text, no tool call), right/wrong tool, latency, and a
 couple of plain Italian answers to judge language quality.
 
 Usage: uv run python scripts/bench_tools.py MODEL [MODEL ...] [--reps 3]
-(needs HOME_BACKEND=ha in .env; only one model is kept in memory at a time)
+(home cases need HOME_BACKEND=ha in .env; only one model is kept in memory at a time)
 """
 
 from __future__ import annotations
@@ -22,8 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from server.config import cfg
 from server.ha import HomeAssistant
+from server.info import Info
 from server.llm import to_ollama
-from server.prompts import build_messages, set_home_context
+from server.prompts import build_messages, set_tool_context
 from server.tools import ToolRegistry
 
 # (phrase, expected tool name suffix, or None = must answer with text and no tool)
@@ -36,6 +37,15 @@ CASES = [
     ("Lo speaker del salotto è acceso?", "GetLiveContext"),
     ("Aggiungi il latte alla lista della spesa", "HassListAddItem"),
     ("Spegni lo speaker del salotto", "HassTurnOff"),
+]
+INFO_CASES = [
+    ("Che tempo fa domani?", "get_weather"),
+    ("Quanti gradi ci sono fuori?", "get_weather"),
+    ("Piove a Roma questo fine settimana?", "get_weather"),
+    ("Dammi le ultime notizie", "get_news"),
+    ("Che novità ci sono nello sport?", "get_news"),
+]
+TEXT_CASES = [
     ("Qual è la capitale del Portogallo?", None),
     ("Raccontami una curiosità sui gatti in una frase", None),
 ]
@@ -50,7 +60,7 @@ async def ollama_stop(model: str) -> None:
         await c.post("/api/generate", json={"model": model, "keep_alive": 0})
 
 
-async def run_model(model: str, reg: ToolRegistry, reps: int) -> dict:
+async def run_model(model: str, reg: ToolRegistry, cases: list, reps: int) -> dict:
     await ollama_stop(cfg.llm_model)
     client = httpx.AsyncClient(base_url=OLLAMA, timeout=120)
 
@@ -80,7 +90,7 @@ async def run_model(model: str, reg: ToolRegistry, reps: int) -> dict:
     load_s = time.perf_counter() - t
     stats = {"empty": 0, "right": 0, "wrong": 0, "lat": []}
     wrong = []
-    for phrase, expected in CASES:
+    for phrase, expected in cases:
         for _ in range(reps):
             text, calls, ms = await chat(phrase)
             stats["lat"].append(ms)
@@ -97,7 +107,7 @@ async def run_model(model: str, reg: ToolRegistry, reps: int) -> dict:
                 stats["wrong"] += 1
                 wrong.append((phrase, calls or text[:60]))
     answers = [(await chat(q, tools=False))[0].strip() for q in QUALITY]
-    n = len(CASES) * reps
+    n = len(cases) * reps
     print(f"\n== {model}  (load {load_s:.1f}s)")
     print(f"   right {stats['right']}/{n}   wrong {stats['wrong']}   EMPTY {stats['empty']}")
     print(f"   first output p50 {statistics.median(stats['lat']):.0f} ms  p90 {sorted(stats['lat'])[int(n * 0.9) - 1]:.0f} ms")
@@ -114,12 +124,13 @@ async def main() -> None:
     args = sys.argv[1:]
     reps = int(args[args.index("--reps") + 1]) if "--reps" in args else 3
     models = [a for i, a in enumerate(args) if not a.startswith("--") and (i == 0 or args[i - 1] != "--reps")]
-    reg = ToolRegistry(HomeAssistant())
+    reg = ToolRegistry(HomeAssistant() if cfg.home_backend == "ha" else None, Info() if cfg.info_tools else None)
     await reg.start()
-    set_home_context(reg.context)
-    print(f"{len(reg.specs)} tools from Home Assistant, {len(CASES)} cases x {reps}")
+    set_tool_context(reg)
+    cases = (CASES if reg.home_enabled else []) + (INFO_CASES if reg.info_specs else []) + TEXT_CASES
+    print(f"{len(reg.home_specs)} home tools, {len(reg.info_specs)} info tools, {len(cases)} cases x {reps}")
     for m in models:
-        await run_model(m, reg, reps)
+        await run_model(m, reg, cases, reps)
     # Reload the configured model so the running voicebot stays fast.
     async with httpx.AsyncClient(timeout=120) as client:
         await client.post(f"{OLLAMA}/api/generate", json={"model": cfg.llm_model, "prompt": "", "keep_alive": -1})

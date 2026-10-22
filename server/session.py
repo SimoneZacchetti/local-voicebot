@@ -6,7 +6,8 @@ Wire protocol (see README for the full table):
 - server -> client binary: 8-byte header ``<II`` = turn, seq, then Int16 LE PCM, 24 kHz mono.
 - everything else is JSON text messages. Typed chat: ``{"type": "text", "text", "heard_turn",
   "heard_seq", "playing"}``; replies are spoken only while voice is on (``hello`` or mic audio turn
-  it on, ``{"type": "voice", "on": false}`` turns it off).
+  it on, ``{"type": "voice", "on": false}`` turns it off). ``{"type": "location", "lat", "lon"}``: where
+  the user is (browser geolocation), for the weather tool.
 """
 
 from __future__ import annotations
@@ -24,9 +25,10 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from .chunker import Chunker
 from .config import cfg
+from .info import valid_coords
 from .langid import BCP47, LangId
 from .llm import LlmRouter
-from .prompts import CANCELLED, DONE, FAILED, GREETINGS, PARTIAL, build_messages, set_home_context
+from .prompts import CANCELLED, DONE, FAILED, GREETINGS, PARTIAL, build_messages, set_tool_context
 from .stats import Stats
 from .stt import SAMPLE_RATE, SttRouter
 from .textclean import clean_for_tts, is_echo, is_hallucination
@@ -119,6 +121,7 @@ class Session:
         self.epoch = 0  # bumped on reset: utterances transcribed across a reset are dropped
         self.voice = False  # the client has a voice session running (mic + player)
         self.confirm_ttl_s: float | None = None  # time to answer "are you sure?" (None: CONFIRM_TTL_S)
+        self.position: tuple[float, float] | None = None  # where the user is (browser/phone), for the weather
         cid = str(ws.query_params.get("client", "")) if ws is not None else ""
         self.client_id = cid if 16 <= len(cid) <= 64 and cid.replace("-", "").isalnum() else ""
 
@@ -181,8 +184,9 @@ class Session:
             "lang": self.lang,
             "vad": {"redemption_ms": cfg.vad_redemption_ms},
             "resumed": resumed,
+            "location": self.svc.tools.wants_position,  # the browser may send where the user is
             "providers": {"stt": self.svc.stt.name, "llm": self.svc.llm.name,
-                          "home_tools": len(self.svc.tools.specs),
+                          "home_tools": len(self.svc.tools.home_specs),
                           "llm_model": cfg.groq_llm_model if self.svc.llm.name == "groq" else cfg.llm_model,
                           "tts": "pocket"},
         })
@@ -228,6 +232,8 @@ class Session:
                 self._spawn(self.greet())
         elif kind == "voice":
             self.voice = bool(m.get("on"))
+        elif kind == "location":
+            self.set_position(m.get("lat"), m.get("lon"))
         elif kind == "text":
             self._spawn(self.handle_text(m))
         elif kind == "speech_start":
@@ -253,6 +259,11 @@ class Session:
             self.history.clear()
             self.lang = cfg.default_lang
             self.send({"type": "reset_done"})
+
+    def set_position(self, lat, lon) -> None:
+        """Where the user is, sent by the browser (geolocation) or the phone API; garbage is ignored."""
+        if valid_coords(lat, lon):
+            self.position = (float(lat), float(lon))
 
     # -- turns --------------------------------------------------------------------------
 
@@ -443,9 +454,10 @@ class Session:
         tools = self.svc.tools
         if await tools.update_route():  # this computer left or reached the home network
             llm.set_tools(tools.specs)
-            set_home_context(tools.context)
+            set_tool_context(tools)
         messages = build_messages(
-            self.history, turn.lang, cfg.groq_history_turns if llm.using_remote else None, with_tools=tools.enabled
+            self.history, turn.lang, cfg.groq_history_turns if llm.using_remote else None, with_tools=tools.enabled,
+            hint=tools.hint(turn.user_text),
         )
         sentences: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -597,10 +609,10 @@ class Session:
     async def _exec(self, turn: Turn, call: ToolCall) -> dict:
         t = time.perf_counter()
         try:
-            res = await asyncio.wait_for(self.svc.tools.execute(call), cfg.tool_timeout_s)
+            res = await asyncio.wait_for(self.svc.tools.execute(call, turn.lang, self.position), cfg.tool_timeout_s)
         except Exception as e:  # noqa: BLE001 - timeout or transport error
             res = {"ok": False, "error": type(e).__name__}
-        if res.get("ok"):
+        if res.get("ok") and self.svc.tools.is_action(call.name):
             turn.actions.append(self.svc.tools.summary(call))
         log.info("tool turn=%d %s %s -> %s (%.0f ms)", turn.id, call.name, call.args,
                  str(res)[:200], (time.perf_counter() - t) * 1000)

@@ -18,6 +18,9 @@ router = APIRouter(prefix="/api", dependencies=[Depends(require_token)])
 class Command(BaseModel):
     text: str = Field(max_length=MAX_TEXT_CHARS)
     session_id: str | None = Field(default=None, max_length=64)
+    # Where the phone is (Shortcuts: "Get Current Location"), for "che tempo fa qui?"
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
 
 
 class Confirm(BaseModel):
@@ -28,7 +31,7 @@ class Confirm(BaseModel):
 
 @router.post("/command")
 async def command(body: Command, request: Request) -> dict:
-    return await request.app.state.phone.command(body.text, body.session_id)
+    return await request.app.state.phone.command(body.text, body.session_id, body.lat, body.lon)
 
 
 @router.post("/confirm")
@@ -42,10 +45,10 @@ async def confirm(body: Confirm, request: Request):
 @router.get("/status")
 async def status(request: Request) -> dict:
     svc = request.app.state.svc
-    warnings = [] if svc.tools.enabled or cfg.home_backend != "ha" else ["Home Assistant unreachable"]
+    warnings = [] if svc.tools.home_enabled or cfg.home_backend != "ha" else ["Home Assistant unreachable"]
     return {
         "route": svc.tools.mode,
-        "home_tools": len(svc.tools.specs),
+        "home_tools": len(svc.tools.home_specs),
         "llm": svc.llm.name,
         "llm_model": cfg.groq_llm_model if svc.llm.name == "groq" else cfg.llm_model,
         "stt": svc.stt.name,

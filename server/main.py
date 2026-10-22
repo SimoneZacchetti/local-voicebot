@@ -16,10 +16,11 @@ from fastapi.staticfiles import StaticFiles
 from .api import router as api_router
 from .auth import RemoteGate, SecurityHeaders
 from .config import cfg
+from .info import Info
 from .langid import LangId
 from .llm import LlmRouter
 from .phone import PhoneSessions
-from .prompts import set_home_context
+from .prompts import set_tool_context
 from .session import Services, Session
 from .stats import SOURCES, Stats
 from .stt import SttRouter
@@ -52,8 +53,9 @@ def build_services() -> Services:
         from .ha import HomeAssistant
 
         ha = HomeAssistant()
+    info = Info() if cfg.info_tools else None
     stats = Stats(ROOT / cfg.stats_db, cfg.stats_retention_days) if cfg.stats_enabled else None
-    return Services(stt=SttRouter(), llm=LlmRouter(), tts=PocketTts(), langid=LangId(), tools=ToolRegistry(ha),
+    return Services(stt=SttRouter(), llm=LlmRouter(), tts=PocketTts(), langid=LangId(), tools=ToolRegistry(ha, info),
                     stats=stats)
 
 
@@ -61,7 +63,7 @@ async def start_tools(svc: Services) -> bool:
     ok = await svc.tools.start()
     await svc.tools.update_route()
     svc.llm.set_tools(svc.tools.specs)
-    set_home_context(svc.tools.context)
+    set_tool_context(svc.tools)
     return ok
 
 
@@ -70,7 +72,7 @@ async def retry_tools(svc: Services) -> None:
     while True:
         await asyncio.sleep(cfg.ha_retry_s)
         if await start_tools(svc):
-            log.info("Home Assistant reachable again: home_tools=%d", len(svc.tools.specs))
+            log.info("Home Assistant reachable again: home_tools=%d", len(svc.tools.home_specs))
             return
 
 
@@ -92,9 +94,10 @@ async def warmup(svc: Services) -> bool:
         timed("tts", svc.tts.preload(cfg.pocket_preload)),
         timed("llm", svc.llm.warmup()),
         timed("langid", asyncio.to_thread(svc.langid.warmup)),
+        *([timed("info", svc.tools.info.warmup())] if svc.tools.info is not None else []),
     )
     log.info("ready in %.1fs: stt=%s llm=%s (%s) home_tools=%d", time.perf_counter() - t, svc.stt.name, svc.llm.name,
-             cfg.groq_llm_model if svc.llm.name == "groq" else cfg.llm_model, len(svc.tools.specs))
+             cfg.groq_llm_model if svc.llm.name == "groq" else cfg.llm_model, len(svc.tools.home_specs))
     return tools_ok
 
 

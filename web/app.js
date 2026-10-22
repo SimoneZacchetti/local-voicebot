@@ -21,6 +21,7 @@ const REMOTE = !["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
 const PREBUFFER_MS = REMOTE ? 200 : 0;
 
 let ws = null;
+let position = null; // {lat, lon} from the browser, for "che tempo fa qui?"
 let readyMsg = null; // "ready" of the open WebSocket (reused when voice starts after chatting)
 let vad = null;
 let ctx = null;
@@ -138,7 +139,7 @@ function renderCaption() {
 function describeCall(c) {
   const name = c.name.split("__").pop().replace(/^Hass/, "");
   const a = c.args || {};
-  const target = a.name || a.area || a.command || a.message || "";
+  const target = a.name || a.area || a.command || a.message || a.location || a.topic || "";
   return target ? `${name} · ${target}` : name;
 }
 
@@ -372,6 +373,8 @@ function connect() {
         if (m.type === "ready") {
           opened = true;
           resolve((readyMsg = m));
+          if (m.location && position) sock.send(JSON.stringify({ type: "location", ...position }));
+          if (m.location) locate(false); // already allowed: refresh it, no prompt
           if (hadConnection) onReconnected(m);
           hadConnection = true;
         }
@@ -688,6 +691,7 @@ async function start() {
   refreshState();
   // No greeting in the middle of a conversation already started in the chat.
   ws.send(JSON.stringify({ type: "hello", greet: !$("log").querySelector(".msg") }));
+  locate(true);
 }
 
 // Voice only: the WebSocket stays open, so the conversation goes on in the chat.
@@ -762,6 +766,33 @@ function silenceBot() {
   refreshState();
 }
 
+// ---------------------------------------------------------------- location
+
+// Where the user is, for the weather. ask = true may show the browser's permission prompt (so only after
+// a click); false only reads a position already allowed. Denied or unavailable: the server falls back to
+// WEATHER_LOCATION or the public IP. Resolves when done, never rejects.
+async function locate(ask) {
+  if (!("geolocation" in navigator) || !readyMsg?.location) return;
+  if (!ask) {
+    try {
+      if ((await navigator.permissions.query({ name: "geolocation" })).state !== "granted") return;
+    } catch {
+      return; // no Permissions API: wait for a click
+    }
+  }
+  await new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        position = { lat: p.coords.latitude, lon: p.coords.longitude };
+        if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "location", ...position }));
+        resolve();
+      },
+      resolve,
+      { enableHighAccuracy: false, maximumAge: 10 * 60 * 1000, timeout: 15000 },
+    );
+  });
+}
+
 // ---------------------------------------------------------------- chat
 
 async function sendText(text) {
@@ -773,6 +804,9 @@ async function sendText(text) {
     notice(`Could not connect: ${err.message || err}`, true);
     return false;
   }
+  // First message: the position, if quick (allowed already), goes before the question.
+  if (!position) await Promise.race([locate(true), new Promise((r) => setTimeout(r, 1500))]);
+  if (ws?.readyState !== WebSocket.OPEN) return false;
   // What the user got of the current reply: heard (voice on) or read (text only).
   const t = turns.get(currentTurn);
   const seen = running ? (heard.turn === currentTurn ? heard.seq : -1) : (t ? t.sentences.length - 1 : -1);
