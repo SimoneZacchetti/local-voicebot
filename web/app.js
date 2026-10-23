@@ -200,6 +200,51 @@ const WX_ICONS = [
   [[51, 53, 55, 56, 57, 80, 81, 82], "🌦️"], [[61, 63, 65, 66, 67], "🌧️"], [[71, 73, 75, 77, 85, 86], "🌨️"],
   [[95, 96, 99], "⛈️"],
 ];
+// Card labels in the language of the conversation (the 7 with a local voice; others get English).
+const SKY_KEYS = [
+  [[0], "clear"], [[1], "mainlyClear"], [[2], "partlyCloudy"], [[3], "overcast"], [[45, 48], "fog"],
+  [[51, 53, 55, 56, 57], "drizzle"], [[61, 63, 66], "rain"], [[65, 67], "heavyRain"], [[71, 73, 77, 85], "snow"],
+  [[75, 86], "heavySnow"], [[80, 81], "showers"], [[82], "heavyShowers"], [[95], "thunderstorm"], [[96, 99], "hail"],
+];
+const CARD_TEXT = {
+  en: { feels: "feels", wind: "wind", here: "Your position", approx: "approx.", approxTitle: "Estimated from the internet connection",
+    news: "News", close: "Close", clear: "Clear", mainlyClear: "Mostly clear", partlyCloudy: "Partly cloudy",
+    overcast: "Overcast", fog: "Fog", drizzle: "Drizzle", rain: "Rain", heavyRain: "Heavy rain", snow: "Snow",
+    heavySnow: "Heavy snow", showers: "Showers", heavyShowers: "Heavy showers", thunderstorm: "Thunderstorm",
+    hail: "Thunderstorm with hail" },
+  it: { feels: "percepiti", wind: "vento", here: "La tua posizione", approx: "approssimata",
+    approxTitle: "Stimata dalla connessione internet", news: "Notizie", close: "Chiudi", clear: "Sereno",
+    mainlyClear: "Poco nuvoloso", partlyCloudy: "Parzialmente nuvoloso", overcast: "Coperto", fog: "Nebbia",
+    drizzle: "Pioviggine", rain: "Pioggia", heavyRain: "Pioggia forte", snow: "Neve", heavySnow: "Neve forte",
+    showers: "Rovesci", heavyShowers: "Rovesci forti", thunderstorm: "Temporale", hail: "Temporale con grandine" },
+  fr: { feels: "ressenti", wind: "vent", here: "Votre position", approx: "approx.",
+    approxTitle: "Estimée d'après la connexion internet", news: "Actualités", close: "Fermer", clear: "Ensoleillé",
+    mainlyClear: "Peu nuageux", partlyCloudy: "Partiellement nuageux", overcast: "Couvert", fog: "Brouillard",
+    drizzle: "Bruine", rain: "Pluie", heavyRain: "Forte pluie", snow: "Neige", heavySnow: "Forte neige",
+    showers: "Averses", heavyShowers: "Fortes averses", thunderstorm: "Orage", hail: "Orage avec grêle" },
+  de: { feels: "gefühlt", wind: "Wind", here: "Dein Standort", approx: "ungefähr",
+    approxTitle: "Geschätzt anhand der Internetverbindung", news: "Nachrichten", close: "Schließen", clear: "Klar",
+    mainlyClear: "Überwiegend klar", partlyCloudy: "Teilweise bewölkt", overcast: "Bedeckt", fog: "Nebel",
+    drizzle: "Nieselregen", rain: "Regen", heavyRain: "Starker Regen", snow: "Schnee", heavySnow: "Starker Schneefall",
+    showers: "Schauer", heavyShowers: "Starke Schauer", thunderstorm: "Gewitter", hail: "Gewitter mit Hagel" },
+  es: { feels: "sensación", wind: "viento", here: "Tu ubicación", approx: "aprox.",
+    approxTitle: "Estimada a partir de la conexión a internet", news: "Noticias", close: "Cerrar", clear: "Despejado",
+    mainlyClear: "Poco nuboso", partlyCloudy: "Parcialmente nublado", overcast: "Cubierto", fog: "Niebla",
+    drizzle: "Llovizna", rain: "Lluvia", heavyRain: "Lluvia fuerte", snow: "Nieve", heavySnow: "Nevada fuerte",
+    showers: "Chubascos", heavyShowers: "Chubascos fuertes", thunderstorm: "Tormenta", hail: "Tormenta con granizo" },
+  pt: { feels: "sensação", wind: "vento", here: "A sua localização", approx: "aprox.",
+    approxTitle: "Estimada a partir da ligação à internet", news: "Notícias", close: "Fechar", clear: "Céu limpo",
+    mainlyClear: "Pouco nublado", partlyCloudy: "Parcialmente nublado", overcast: "Encoberto", fog: "Nevoeiro",
+    drizzle: "Chuvisco", rain: "Chuva", heavyRain: "Chuva forte", snow: "Neve", heavySnow: "Neve forte",
+    showers: "Aguaceiros", heavyShowers: "Aguaceiros fortes", thunderstorm: "Trovoada", hail: "Trovoada com granizo" },
+  nl: { feels: "gevoel", wind: "wind", here: "Jouw locatie", approx: "ongeveer",
+    approxTitle: "Geschat op basis van de internetverbinding", news: "Nieuws", close: "Sluiten", clear: "Helder",
+    mainlyClear: "Overwegend helder", partlyCloudy: "Half bewolkt", overcast: "Bewolkt", fog: "Mist",
+    drizzle: "Motregen", rain: "Regen", heavyRain: "Zware regen", snow: "Sneeuw", heavySnow: "Zware sneeuwval",
+    showers: "Buien", heavyShowers: "Zware buien", thunderstorm: "Onweer", hail: "Onweer met hagel" },
+};
+const cardText = (lang) => CARD_TEXT[(lang || "").slice(0, 2)] || CARD_TEXT.en;
+const skyText = (code, t) => t[SKY_KEYS.find(([codes]) => codes.includes(code))?.[1]] || "";
 const wxIcon = (code, day = 1) => {
   const row = WX_ICONS.find(([codes]) => codes.includes(code));
   return row ? (!day && row[2]) || row[1] : "🌡️";
@@ -208,6 +253,7 @@ const deg = (x) => (x === null || x === undefined ? "–" : `${x}°`);
 const webLink = (u) => (typeof u === "string" && /^https?:\/\//.test(u) ? u : null);
 
 function weatherCard(c, lang) {
+  const tx = cardText(lang);
   let weekday = (d) => d;
   let today = "Today";
   try {
@@ -225,18 +271,18 @@ function weatherCard(c, lang) {
     + `<span class="wx-ico">${wxIcon(h.code, h.day)}</span><b>${deg(h.temp)}</b>`
     + `<small>${h.rain ? `${h.rain}%` : "&nbsp;"}</small></div>`).join("");
   const days = c.days.map((d, i) => `<div class="wx-day"><span class="wx-wd">${esc(i ? weekday(d.date) : today)}</span>`
-    + `<span class="wx-ico" title="${esc(d.sky)}">${wxIcon(d.code)}</span>`
+    + `<span class="wx-ico" title="${esc(skyText(d.code, tx))}">${wxIcon(d.code)}</span>`
     + `<small class="wx-rain">${d.rain ? `${d.rain}%` : ""}</small><span class="wx-min">${deg(d.min)}</span>`
     + `<span class="wx-bar"><i style="left:${((d.min - lo) / span) * 100}%;right:${((lo + span - d.max) / span) * 100}%"></i></span>`
     + `<span>${deg(d.max)}</span></div>`).join("");
-  return `<div class="card-head"><span class="card-title">${esc(c.place || "Your position")}</span>`
-    + `${c.approximate ? '<span class="card-note" title="Estimated from the internet connection">approx.</span>' : ""}</div>`
+  return `<div class="card-head"><span class="card-title">${esc(c.place || tx.here)}</span>`
+    + `${c.approximate ? `<span class="card-note" title="${esc(tx.approxTitle)}">${esc(tx.approx)}</span>` : ""}</div>`
     + `<div class="wx-now"><span class="wx-big">${wxIcon(n.code, n.day)}</span><span class="wx-temp">${deg(n.temp)}</span>`
-    + `<span class="wx-meta">${esc(n.sky)}<br>feels ${deg(n.feels)} · wind ${n.wind ?? "–"} km/h</span></div>`
+    + `<span class="wx-meta">${esc(skyText(n.code, tx))}<br>${esc(tx.feels)} ${deg(n.feels)} · ${esc(tx.wind)} ${n.wind ?? "–"} km/h</span></div>`
     + `<div class="wx-hours">${hours}</div><div class="wx-days">${days}</div>`;
 }
 
-function newsCard(c) {
+function newsCard(c, lang) {
   const items = c.items.map((i) => {
     const link = webLink(i.link);
     const img = webLink(i.image);
@@ -246,16 +292,17 @@ function newsCard(c) {
       ? `<a class="news-item" href="${esc(link)}" target="_blank" rel="noopener noreferrer">${body}</a>`
       : `<div class="news-item">${body}</div>`;
   }).join("");
-  return `<div class="card-head"><span class="card-title">${esc(c.source || "News")}</span></div><div class="news">${items}</div>`;
+  return `<div class="card-head"><span class="card-title">${esc(c.source || cardText(lang).news)}</span></div>`
+    + `<div class="news">${items}</div>`;
 }
 
 // Shown over the orb while it is relevant (until the next turn or ✕), and kept in the history.
 function showCard(card, turn) {
   const lang = turnState(turn).lang || navigator.language;
-  const html = card.kind === "weather" ? weatherCard(card, lang) : card.kind === "news" ? newsCard(card) : "";
+  const html = card.kind === "weather" ? weatherCard(card, lang) : card.kind === "news" ? newsCard(card, lang) : "";
   if (!html) return;
   const el = $("card");
-  el.innerHTML = `<button class="card-close icon-btn" aria-label="Close">`
+  el.innerHTML = `<button class="card-close icon-btn" aria-label="${esc(cardText(lang).close)}">`
     + `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button>${html}`;
   el.hidden = false;
   el.scrollTop = 0;
