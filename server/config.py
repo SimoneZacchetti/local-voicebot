@@ -57,6 +57,17 @@ def default_stt_threads() -> int:
     return min(4, max(1, (os.cpu_count() or 2) // 2))
 
 
+# Default news source per language (RSS); NEWS_FEED_<LANG> overrides it (other languages get the English one).
+NEWS_FEEDS = {
+    "it": "https://www.ansa.it/sito/ansait_rss.xml",
+    "en": "https://feeds.bbci.co.uk/news/rss.xml",
+    "fr": "https://www.france24.com/fr/rss",
+    "de": "https://www.tagesschau.de/xml/rss2",
+    "es": "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada",
+    "pt": "https://www.rtp.pt/noticias/rss",
+    "nl": "https://feeds.nos.nl/nosnieuwsalgemeen",
+}
+
 # The 25 European languages Parakeet TDT v3 transcribes.
 PARAKEET_LANGS = (
     "bg,hr,cs,da,nl,en,et,fi,fr,de,el,hu,it,lv,lt,mt,pl,pt,ro,sk,sl,es,sv,ru,uk"
@@ -173,6 +184,15 @@ class Config:
     confirm_risky: bool = field(default_factory=lambda: _env_bool("CONFIRM_RISKY", True))
     confirm_ttl_s: float = field(default_factory=lambda: _env_float("CONFIRM_TTL_S", 30.0))
     risky_domains: list[str] = field(default_factory=lambda: _env_list("RISKY_DOMAINS", "lock,alarm_control_panel,valve,siren"))
+
+    # Weather and news tools (free web services, no API key): an empty INFO_TOOLS keeps the bot fully offline
+    info_tools: list[str] = field(default_factory=lambda: _env_list("INFO_TOOLS", "weather,news"))
+    # Weather when no place is said: empty = where you are (browser/phone position, else public IP);
+    # or a city name, or "lat,lon"
+    weather_location: str = field(default_factory=lambda: _env("WEATHER_LOCATION", ""))
+    news_feeds: dict[str, str] = field(default_factory=lambda: {
+        lang: _env(f"NEWS_FEED_{lang.upper()}", url) for lang, url in NEWS_FEEDS.items()})
+    news_max_items: int = field(default_factory=lambda: _env_int("NEWS_MAX_ITEMS", 5))
 
     # Server
     host: str = field(default_factory=lambda: _env("HOST", "127.0.0.1"))

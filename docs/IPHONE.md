@@ -114,6 +114,8 @@ In the **Shortcuts** app tap **+** and add these actions:
 
 Name it **"Home assistant"**. Avoid plain "Home": it gets confused with Apple's Home app. Then try it: *"Hey Siri, Home assistant"* → *"turn off the kitchen light"*.
 
+For "what's the weather here?", add **Get Current Location** before **Get Contents of URL**, and two more Number fields in the body: `lat` = *Current Location* › Latitude and `lon` = *Current Location* › Longitude. Without them the bot uses `WEATHER_LOCATION` or the Mac's IP location, which is wrong when you are away.
+
 `session_id: "phone"` keeps the conversation for 10 minutes (`PHONE_SESSION_TTL_S`): after *"turn on the kitchen light"*, *"and in the bedroom?"* works.
 
 ### "Message home" (text)

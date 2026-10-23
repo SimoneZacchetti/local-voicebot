@@ -237,6 +237,33 @@ async def check_groq() -> None:
             report(OK if model in ids else FAIL, f"Groq model {model}", "available" if model in ids else "not available")
 
 
+async def check_info() -> None:
+    if not cfg.info_tools:
+        return report(OK, "weather and news", "off (INFO_TOOLS empty): fully offline")
+    from server.info import Info
+
+    info = Info()
+    try:
+        if "get_weather" in info.names:
+            try:
+                place = await info.here(cfg.default_lang, None)
+            except httpx.HTTPError as e:
+                return report(FAIL, "weather", f"unreachable: {type(e).__name__}")
+            if place is None:
+                report(WARN, "weather", "no position: set WEATHER_LOCATION (the browser position still works)")
+            else:
+                res = await info.execute("get_weather", {}, cfg.default_lang)
+                where = {"config": "WEATHER_LOCATION", "ip": "public IP, approximate"}.get(place.source, place.source)
+                report(OK if res["ok"] else FAIL, "weather (Open-Meteo)",
+                       f"{res.get('place')} ({where}): {res.get('now', {}).get('temp_c')} °C" if res["ok"] else res["error"])
+        if "get_news" in info.names:
+            res = await info.execute("get_news", {}, cfg.default_lang)
+            report(OK if res["ok"] else WARN, f"news ({cfg.default_lang})",
+                   f"{res['source']}, {len(res['headlines'])} headlines" if res["ok"] else res["error"])
+    finally:
+        await info.client.aclose()
+
+
 def tailscale_cli() -> str | None:
     candidates = (Path("/Applications/Tailscale.app/Contents/MacOS/Tailscale"),
                   Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Tailscale" / "tailscale.exe")
@@ -323,6 +350,7 @@ def main() -> int:
     LangId().warmup()
     report(OK, "language detection (lingua)", f"{len(cfg.langid_langs)} languages")
     asyncio.run(check_groq())
+    asyncio.run(check_info())
     asyncio.run(check_home())
     check_remote()
     print("\nAll good." if not failures else f"\n{failures} problem(s) found.")
