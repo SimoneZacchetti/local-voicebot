@@ -3,7 +3,8 @@
 - Weather: Open-Meteo (forecast and place search). With no place named, the user's own position:
   the one the browser or phone sent, else WEATHER_LOCATION, else a lookup of the public IP.
 - Places for a position: OpenStreetMap Nominatim (reverse geocoding, cached).
-- News: one RSS feed per language (NEWS_FEED_<LANG>).
+- News: one RSS feed per language (NEWS_FEED_<LANG>); news about a topic ("notizie di Madrid") from a
+  Google News search in that language, which covers any place or subject (NEWS_SEARCH=0 turns it off).
 
 Positions are rounded to 0.1° (about 10 km) before they leave this computer. Every answer is
 compact JSON for the LLM, which turns it into a short spoken reply, plus a "card" for the
@@ -33,8 +34,16 @@ FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 IP_URLS = ("https://ipwho.is/", "https://ipapi.co/json/")
+NEWS_SEARCH_URL = "https://news.google.com/rss/search"
+# Google News edition (hl, gl, ceid) per voice language; other languages get the English one.
+NEWS_EDITIONS = {
+    "it": ("it", "IT", "IT:it"), "en": ("en-GB", "GB", "GB:en"), "fr": ("fr", "FR", "FR:fr"),
+    "de": ("de", "DE", "DE:de"), "es": ("es", "ES", "ES:es"), "pt": ("pt-PT", "PT", "PT:pt-150"),
+    "nl": ("nl", "NL", "NL:nl"),
+}
 MAX_FEED_BYTES = 2_000_000
-CARD_NEWS_ITEMS = 8
+CARD_NEWS_ITEMS = 5
+MIN_NEWS_ITEMS = 3  # with a topic, what the answer tells (see prompts.INFO_PROMPT)
 MEDIA = "{http://search.yahoo.com/mrss/}"
 ATOM = "{http://www.w3.org/2005/Atom}"
 
@@ -301,6 +310,9 @@ class Info:
     # -- news ---------------------------------------------------------------------------
 
     async def news(self, args: dict, lang: str) -> dict:
+        topic = str(args.get("topic") or "").strip()
+        if topic and cfg.news_search and (found := await self.search_news(topic, lang)):
+            return found
         url = cfg.news_feeds.get(lang) or cfg.news_feeds.get("en")
         if not url:
             return {"ok": False, "error": "no news source configured for this language"}
@@ -316,17 +328,44 @@ class Info:
         except (ET.ParseError, ValueError) as e:
             log.warning("news feed %s unreadable: %r", url, e)
             return {"ok": False, "error": "the news source answered with something unreadable"}
-        topic = str(args.get("topic") or "").strip()
         out: dict = {"ok": True, "source": source}
         if topic:
             words = [w for w in re.findall(r"\w+", fold(topic)) if len(w) >= 3]
             hits = [i for i in items if any(w in fold(f"{i['title']} {i['summary']}") for w in words)]
             if not hits:
                 out["note"] = f"no headline about {topic} right now: these are the top headlines"
+            elif len(hits) < MIN_NEWS_ITEMS:
+                # Always three to tell: fill with the top headlines, and say which ones are on the topic.
+                out["note"] = (f"only the first {len(hits)} headline(s) are about {topic}: "
+                               "the others are top headlines, say so")
+                hits += [i for i in items if i not in hits][: MIN_NEWS_ITEMS - len(hits)]
             items = hits or items
         out["headlines"] = [{"title": i["title"], "summary": i["summary"]} for i in items[: cfg.news_max_items]]
         out["card"] = {"kind": "news", "source": source, "items": items[:CARD_NEWS_ITEMS]}
         return out
+
+    async def search_news(self, topic: str, lang: str) -> dict | None:
+        """Latest news about a topic from Google News, or None (the feed of the language then filters)."""
+        hl, gl, ceid = NEWS_EDITIONS.get(lang, NEWS_EDITIONS["en"])
+
+        async def fetch():
+            r = await self.client.get(NEWS_SEARCH_URL, params={"q": topic, "hl": hl, "gl": gl, "ceid": ceid})
+            r.raise_for_status()
+            if len(r.content) > MAX_FEED_BYTES:
+                raise ValueError("feed too large")
+            return parse_feed(r.content)[1]
+        try:
+            items = await self._cached(("news-search", fold(topic), lang), 900, fetch)
+        except (httpx.HTTPError, ET.ParseError, ValueError) as e:
+            log.info("news search for %r failed: %r", topic, e)
+            return None
+        if not items:
+            return None
+        # Titles end with " - <newspaper>"; the description only repeats them.
+        items = [{**i, **dict(zip(("title", "summary"), split_outlet(i["title"])))} for i in items]
+        return {"ok": True, "source": "Google News",
+                "headlines": [{"title": i["title"], "newspaper": i["summary"]} for i in items[: cfg.news_max_items]],
+                "card": {"kind": "news", "source": f"Google News · {topic}", "items": items[:CARD_NEWS_ITEMS]}}
 
 
 def summarize(j: dict) -> dict:
@@ -386,6 +425,12 @@ _TAG = re.compile(r"<[^>]+>")
 
 def clean(text: str | None) -> str:
     return re.sub(r"\s+", " ", html.unescape(_TAG.sub(" ", text or ""))).strip()
+
+
+def split_outlet(title: str) -> tuple[str, str]:
+    """Google News title "Headline - Newspaper" -> ("Headline", "Newspaper")."""
+    head, sep, outlet = title.rpartition(" - ")
+    return (head, outlet) if sep and head else (title, "")
 
 
 def safe_url(url: str | None) -> str | None:

@@ -50,6 +50,13 @@ ATOM = b"""<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title
 <entry><title>Headline one</title><summary>Short &amp; sweet</summary><link href="https://example.org/one"/></entry></feed>"""
 
 
+GNEWS = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>"Madrid" - Google News</title>
+<item><title>Madrid, corteo per le pensioni - Il Sole 24 ORE</title><link>https://news.google.com/rss/articles/a1</link>
+  <description>&lt;a href="https://news.google.com/rss/articles/a1"&gt;Madrid, corteo per le pensioni&lt;/a&gt;</description></item>
+<item><title>Real Madrid - Barcellona, le formazioni - Goal.com</title><link>https://news.google.com/rss/articles/a2</link></item>
+</channel></rss>"""
+
+
 class Web:
     """Fake web services. Records every request; ``down`` makes them fail."""
 
@@ -73,6 +80,11 @@ class Web:
             return httpx.Response(200, json={"name": "Milano", "address": {"city": "Milano"}})
         if host == "ipwho.is":
             return httpx.Response(200, json={"success": True, "latitude": 40.4165, "longitude": -3.7026, "city": "Madrid"})
+        if host == "news.google.com" and q["q"] == "Madrid":
+            assert (q["hl"], q["gl"], q["ceid"]) == ("it", "IT", "IT:it")
+            return httpx.Response(200, content=GNEWS)
+        if host == "news.google.com" and q["q"] == "Marte":
+            return httpx.Response(200, content=GNEWS.split(b"<item>")[0] + b"</channel></rss>")
         if host == "www.ansa.it":
             return httpx.Response(200, content=RSS)
         if host == "feeds.bbci.co.uk":
@@ -181,12 +193,30 @@ async def test_news_in_the_user_language_with_topic(web):
     assert set(res["headlines"][0]) == {"title", "summary"}  # links and pictures are for the screen only
     assert res["card"]["kind"] == "news" and res["card"]["items"][0]["image"] == "https://img.ansa.it/ora.jpg"
     res = await web.info.news({"topic": "Sport"}, "it")
-    assert [h["title"] for h in res["headlines"]] == ["Serie A, l'Inter vince il derby"] and "note" not in res
+    # Topic headlines first, then top headlines up to three (the feed has only two).
+    assert [h["title"] for h in res["headlines"]] == ["Serie A, l'Inter vince il derby", "Ora solare, i consigli utili"]
+    assert "only the first 1 headline(s) are about Sport" in res["note"]
     res = await web.info.news({"topic": "Marte"}, "it")
     assert "no headline about Marte" in res["note"] and len(res["headlines"]) == 2
     assert web.hosts().count("www.ansa.it") == 1  # cached
     res = await web.info.news({}, "pl")  # no Polish source: the English one
     assert res["headlines"][0]["title"] == "Headline one"
+
+
+async def test_news_about_a_topic_from_google_news(web, monkeypatch):
+    res = await web.info.news({"topic": "Madrid"}, "it")
+    assert res["source"] == "Google News" and res["headlines"] == [
+        {"title": "Madrid, corteo per le pensioni", "newspaper": "Il Sole 24 ORE"},
+        {"title": "Real Madrid - Barcellona, le formazioni", "newspaper": "Goal.com"}]
+    assert res["card"]["source"] == "Google News · Madrid"
+    assert res["card"]["items"][0]["link"] == "https://news.google.com/rss/articles/a1"
+    # Nothing found, or search off: the feed of the language, filtered by the topic.
+    res = await web.info.news({"topic": "Marte"}, "it")
+    assert res["source"].startswith("Primo piano ANSA") and "no headline about Marte" in res["note"]
+    monkeypatch.setattr(cfg, "news_search", False)
+    res = await web.info.news({"topic": "Madrid"}, "it")
+    assert res["source"].startswith("Primo piano ANSA")
+    assert web.hosts().count("news.google.com") == 2  # Madrid cached, Marte once, none with search off
 
 
 async def test_unreadable_feed(web):
@@ -311,6 +341,35 @@ def test_weather_here_in_a_chat(chat):
     tool_msg = chat.sessions[0].svc.llm.calls[-1][-1]
     assert tool_msg["role"] == "tool" and "card" not in json.loads(tool_msg["content"])
     assert "ipwho.is" not in chat.web.hosts()
+
+
+class MemoryLlm(WeatherLlm):
+    """Answers news from memory; calls get_news only after ``stubborn`` firm reminders."""
+
+    def __init__(self, stubborn):
+        super().__init__()
+        self.stubborn = stubborn
+
+    async def stream(self, messages):
+        self.calls.append(messages)
+        if messages[-1]["role"] == "tool":
+            yield "Ecco le notizie vere."
+        elif "Do not answer from memory" in messages[-1]["content"] and not self.stubborn:
+            yield ToolCall("n1", "get_news", {"topic": "Madrid"})
+        else:
+            yield "Il sindaco di Madrid è stato arrestato."
+
+
+@pytest.mark.parametrize("stubborn,said", [(False, "Ecco le notizie vere."), (True, "Non ci sono riuscito.")])
+def test_news_answered_from_memory_is_never_said(chat, stubborn, said):
+    with chat.websocket_connect("/ws") as ws:
+        recv(ws)
+        chat.sessions[0].svc.llm = MemoryLlm(stubborn)
+        ws.send_text(json.dumps({"type": "text", "text": "dimmi le ultime notizie di Madrid"}))
+        msgs = recv_until(ws, lambda m: m["type"] == "turn_end")
+    assert [m["text"] for m in msgs if m["type"] == "sentence"] == [said]
+    assert "arrestato" not in "".join(m.get("text", "") for m in msgs if m["type"] == "token")
+    assert len(chat.sessions[0].svc.llm.calls) == 2 + (not stubborn)  # first try, reminder, (after the tool)
 
 
 def test_phone_command_with_position(chat, monkeypatch):

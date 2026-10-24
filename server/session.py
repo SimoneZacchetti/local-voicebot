@@ -457,9 +457,10 @@ class Session:
         if await tools.update_route():  # this computer left or reached the home network
             llm.set_tools(tools.specs)
             set_tool_context(tools)
+        hint = tools.hint(turn.user_text)
         messages = build_messages(
             self.history, turn.lang, cfg.groq_history_turns if llm.using_remote else None, with_tools=tools.enabled,
-            hint=tools.hint(turn.user_text),
+            hint=hint,
         )
         sentences: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -469,29 +470,54 @@ class Session:
             chunker = Chunker()
             msgs = messages
             failed = unfinished = False
+
+            def say(delta: str) -> None:
+                self.send({"type": "token", "turn": turn.id, "text": delta})
+                for s in chunker.feed(delta):
+                    sentences.put_nowait(s)
+
+            async def ask(msgs: list[dict], rnd: int, hold: bool) -> tuple[list[ToolCall], list[str]]:
+                """One LLM reply. ``hold``: keep the text back instead of saying it as it streams."""
+                calls: list[ToolCall] = []
+                text: list[str] = []
+                t_round = time.perf_counter()
+                ttft_key = "llm_ttft_ms" if rnd == 0 else "llm_after_tools_ttft_ms"
+                for attempt in range(cfg.llm_empty_retries + 1):
+                    async for delta in llm.stream(msgs):
+                        if isinstance(delta, ToolCall):
+                            turn.metrics.setdefault("llm_tool_call_ms", round((time.perf_counter() - t_round) * 1000))
+                            calls.append(delta)
+                            continue
+                        turn.metrics.setdefault(ttft_key, round((time.perf_counter() - t_round) * 1000))
+                        text.append(delta)
+                        if not hold:
+                            say(delta)
+                    if calls or "".join(text).strip():
+                        break
+                    # Ollama's Gemma 4 parser sometimes drops a tool call and returns nothing
+                    # at all. Nothing was said yet, so retrying is invisible to the user.
+                    log.warning("turn %d: empty LLM reply (round %d), retry %d", turn.id, rnd, attempt + 1)
+                    turn.metrics["llm_empty_retries"] = turn.metrics.get("llm_empty_retries", 0) + 1
+                return calls, text
+
             try:
                 for rnd in range(cfg.tool_max_rounds + 1):
-                    calls: list[ToolCall] = []
-                    text: list[str] = []
-                    t_round = time.perf_counter()
-                    ttft_key = "llm_ttft_ms" if rnd == 0 else "llm_after_tools_ttft_ms"
-                    for attempt in range(cfg.llm_empty_retries + 1):
-                        async for delta in llm.stream(msgs):
-                            if isinstance(delta, ToolCall):
-                                turn.metrics.setdefault("llm_tool_call_ms", round((time.perf_counter() - t_round) * 1000))
-                                calls.append(delta)
-                                continue
-                            turn.metrics.setdefault(ttft_key, round((time.perf_counter() - t_round) * 1000))
-                            self.send({"type": "token", "turn": turn.id, "text": delta})
-                            text.append(delta)
-                            for s in chunker.feed(delta):
-                                sentences.put_nowait(s)
-                        if calls or "".join(text).strip():
-                            break
-                        # Ollama's Gemma 4 parser sometimes drops a tool call and returns nothing
-                        # at all. Nothing was said yet, so retrying is invisible to the user.
-                        log.warning("turn %d: empty LLM reply (round %d), retry %d", turn.id, rnd, attempt + 1)
-                        turn.metrics["llm_empty_retries"] = turn.metrics.get("llm_empty_retries", 0) + 1
+                    # A weather or news question answered without the tool is made up (Qwen does it after
+                    # a few tool turns, despite the hint): hold the text until the tool call shows up.
+                    hold = hint is not None and rnd == 0
+                    calls, text = await ask(msgs, rnd, hold)
+                    if hold and not calls:
+                        log.warning("turn %d: answered without %s, asking again: %r", turn.id, hint, "".join(text))
+                        turn.metrics["llm_hint_retries"] = 1
+                        again = [*msgs[:-1], {**msgs[-1], "content": msgs[-1]["content"]
+                                              + f"\n\n(Do not answer from memory: call {hint} now.)"}]
+                        calls, text = await ask(again, rnd, hold)
+                        if not calls:
+                            failed = True
+                            text = [FAILED.get(turn.lang, FAILED["en"])]
+                    if hold:
+                        for delta in text:
+                            say(delta)
                     if llm.last_fallback:
                         fallbacks.append(llm.last_fallback)
                     if not calls:

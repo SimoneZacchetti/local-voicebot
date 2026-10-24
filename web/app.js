@@ -116,6 +116,9 @@ function getLevels() {
 const orb = new VoiceOrb($("viz"), getLevels);
 window.voiceOrb = orb; // handy for debugging from the console
 
+// Captions are one flowing text: no list markers or line breaks from the chat formatting.
+const captionText = (s) => s.replace(/^\s*(?:[-*•]|\d+[.)])\s+/gm, "").replace(/\s*\n+\s*/g, " ");
+
 function showUserCaption(text) {
   $("cap-user").textContent = text;
   $("cap-bot").textContent = "";
@@ -128,8 +131,8 @@ function renderCaption() {
   const el = $("cap-bot");
   if (!t || !t.sentences.length) return;
   const i = heard.turn === currentTurn ? Math.max(heard.seq, 0) : 0;
-  const now = t.sentences[i] || "";
-  const next = heard.turn === currentTurn && heard.seq >= 0 ? t.sentences[i + 1] || "" : "";
+  const now = captionText(t.sentences[i] || "");
+  const next = captionText(heard.turn === currentTurn && heard.seq >= 0 ? t.sentences[i + 1] || "" : "");
   const spoken = heard.turn === currentTurn && heard.seq >= 0;
   el.innerHTML = spoken
     ? `${esc(now)}${next ? ` <span class="pending next">${esc(next)}</span>` : ""}`
@@ -188,7 +191,7 @@ function renderBot(turn) {
   t.bot.scrollIntoView({ block: "end", behavior: "smooth" });
   if (turn === currentTurn && (!running || (!t.sentences.length && t.user === null))) {
     // Greeting (no transcript) or text-only chat: caption the whole text.
-    $("cap-bot").textContent = t.text;
+    $("cap-bot").textContent = captionText(t.text);
   }
 }
 
@@ -307,7 +310,7 @@ function showCard(card, turn) {
   el.hidden = false;
   el.scrollTop = 0;
   document.body.classList.add("has-card");
-  addMsg("card", html);
+  addMsg("card-msg", html); // not "card": that class is the overlay (max-height, scroll)
 }
 
 function hideCard() {
@@ -872,7 +875,6 @@ $("start").addEventListener("click", start);
 $("confirm-yes").addEventListener("click", () => answerConfirm(true));
 $("confirm-no").addEventListener("click", () => answerConfirm(false));
 $("mute").addEventListener("click", () => setMuted(!muted));
-$("history-btn").addEventListener("click", () => toggleDrawer());
 $("drawer-close").addEventListener("click", () => toggleDrawer(false));
 $("scrim").addEventListener("click", () => toggleDrawer(false));
 $("card").addEventListener("click", (e) => e.target.closest(".card-close") && hideCard());
@@ -968,9 +970,11 @@ $("chat-input").addEventListener("keydown", (e) => {
     $("chat").requestSubmit();
   }
 });
+// One button for the panel: conversation history, chat and settings.
 $("chat-btn").addEventListener("click", () => {
-  toggleDrawer(true);
-  $("chat-input").focus();
+  const open = !$("drawer").classList.contains("open");
+  toggleDrawer(open);
+  if (open) $("chat-input").focus();
 });
 
 $("viz").addEventListener("click", () => {

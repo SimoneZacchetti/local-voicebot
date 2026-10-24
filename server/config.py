@@ -192,6 +192,8 @@ class Config:
     weather_location: str = field(default_factory=lambda: _env("WEATHER_LOCATION", ""))
     news_feeds: dict[str, str] = field(default_factory=lambda: {
         lang: _env(f"NEWS_FEED_{lang.upper()}", url) for lang, url in NEWS_FEEDS.items()})
+    # News about a topic ("notizie di Madrid") from a Google News search; 0 = only filter the feed above
+    news_search: bool = field(default_factory=lambda: _env_bool("NEWS_SEARCH", True))
     news_max_items: int = field(default_factory=lambda: _env_int("NEWS_MAX_ITEMS", 5))
 
     # Server

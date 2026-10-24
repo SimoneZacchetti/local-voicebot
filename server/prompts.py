@@ -41,7 +41,7 @@ You can look up the weather (get_weather) and the latest news headlines (get_new
 - Weather: leave location empty when the user means where they are ("qui", "fuori", "here", or no place said);
   otherwise pass the place name. Answer only what was asked (sky, rounded temperature, rain), never every number.
   The result covers today and the next 6 days, each with its weekday: pick the day the user asked about.
-- News: tell at most three headlines, one short sentence each, then offer to tell more.
+- News: tell three headlines (fewer only if the result has fewer), one short sentence each, then offer to tell more.
 - Never make up weather or news: if a tool fails, say you can't check right now."""
 
 TOOLS_SECTION = ""  # set at startup (and when the home route changes): tool rules plus the Home Assistant index

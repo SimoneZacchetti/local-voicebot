@@ -71,17 +71,15 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 }
 
 /* ---- stage: orb + captions ---- */
-.stage { position: relative; display: grid; place-items: center; min-height: 0; }
+/* Orb above, captions below in a row of their own: long answers never cover the orb. */
+.stage { position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; place-items: center; min-height: 0; }
 #viz {
-  width: min(100%, 78vh, 640px);
-  width: min(100%, 78svh, 640px);
-  aspect-ratio: 1;
+  width: 100%; height: 100%; max-width: 640px; max-height: 640px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
 .captions {
-  position: absolute;
-  left: 0; right: 0; bottom: 2%;
+  width: 100%; min-height: 124px; /* room for the user line and 3 lines of answer: the orb keeps its size */
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 0 8px;
   pointer-events: none;
@@ -236,8 +234,8 @@ body.muted #mute .mic-off { display: block; }
 @keyframes card-in { from { opacity: 0; transform: translateY(8px); } }
 /* With a card: card, small orb, captions below it (no overlap). */
 body.has-card .stage { grid-template-rows: auto minmax(0, 1fr) auto; align-items: start; gap: 6px; }
-body.has-card #viz { width: min(100%, 13vh, 130px); width: min(100%, 13svh, 130px); align-self: center; }
-body.has-card .captions { position: static; }
+body.has-card #viz { width: min(100%, 13vh, 130px); width: min(100%, 13svh, 130px); height: auto; aspect-ratio: 1; align-self: center; }
+body.has-card .captions { min-height: 0; }
 body.has-card .cap-bot { -webkit-line-clamp: 2; font-size: 16px; }
 body.has-card .cap-user { display: none; }
 .card-close { position: absolute; top: 6px; right: 6px; width: 36px; height: 36px; }
@@ -286,8 +284,8 @@ a.news-item:active { background: var(--surface); }
   font-size: 13px; color: var(--muted); line-height: 1.35;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.msg.card { max-width: 100%; width: 100%; white-space: normal; background: var(--surface); padding: 12px 14px; }
-.msg.card .wx-hours { display: none; }
+.msg.card-msg { max-width: 100%; width: 100%; white-space: normal; background: var(--surface); padding: 12px 14px; }
+.msg.card-msg .wx-hours { display: none; }
 @media (hover: hover) {
   a.news-item:hover { background: var(--surface); }
 }
@@ -298,7 +296,7 @@ a.news-item:active { background: var(--surface); }
 }
 
 @media (max-width: 560px) {
-  .captions { bottom: 0; }
+  .captions { min-height: 152px; }
   .round-btn { width: 56px; height: 56px; }
   /* Narrow screens: room for the whole sentence being spoken, no preview of the next one. */
   .cap-bot { font-size: 17px; -webkit-line-clamp: 5; }
