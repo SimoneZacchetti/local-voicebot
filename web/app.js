@@ -21,6 +21,7 @@ const REMOTE = !["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
 const PREBUFFER_MS = REMOTE ? 200 : 0;
 
 let ws = null;
+let position = null; // {lat, lon} from the browser, for "che tempo fa qui?"
 let readyMsg = null; // "ready" of the open WebSocket (reused when voice starts after chatting)
 let vad = null;
 let ctx = null;
@@ -115,6 +116,9 @@ function getLevels() {
 const orb = new VoiceOrb($("viz"), getLevels);
 window.voiceOrb = orb; // handy for debugging from the console
 
+// Captions are one flowing text: no list markers or line breaks from the chat formatting.
+const captionText = (s) => s.replace(/^\s*(?:[-*•]|\d+[.)])\s+/gm, "").replace(/\s*\n+\s*/g, " ");
+
 function showUserCaption(text) {
   $("cap-user").textContent = text;
   $("cap-bot").textContent = "";
@@ -127,8 +131,8 @@ function renderCaption() {
   const el = $("cap-bot");
   if (!t || !t.sentences.length) return;
   const i = heard.turn === currentTurn ? Math.max(heard.seq, 0) : 0;
-  const now = t.sentences[i] || "";
-  const next = heard.turn === currentTurn && heard.seq >= 0 ? t.sentences[i + 1] || "" : "";
+  const now = captionText(t.sentences[i] || "");
+  const next = captionText(heard.turn === currentTurn && heard.seq >= 0 ? t.sentences[i + 1] || "" : "");
   const spoken = heard.turn === currentTurn && heard.seq >= 0;
   el.innerHTML = spoken
     ? `${esc(now)}${next ? ` <span class="pending next">${esc(next)}</span>` : ""}`
@@ -138,7 +142,7 @@ function renderCaption() {
 function describeCall(c) {
   const name = c.name.split("__").pop().replace(/^Hass/, "");
   const a = c.args || {};
-  const target = a.name || a.area || a.command || a.message || "";
+  const target = a.name || a.area || a.command || a.message || a.location || a.topic || "";
   return target ? `${name} · ${target}` : name;
 }
 
@@ -187,8 +191,132 @@ function renderBot(turn) {
   t.bot.scrollIntoView({ block: "end", behavior: "smooth" });
   if (turn === currentTurn && (!running || (!t.sentences.length && t.user === null))) {
     // Greeting (no transcript) or text-only chat: caption the whole text.
-    $("cap-bot").textContent = t.text;
+    $("cap-bot").textContent = captionText(t.text);
   }
+}
+
+// ---------------------------------------------------------------- cards (weather, news)
+
+// WMO weather codes -> icon by day, icon by night (when different).
+const WX_ICONS = [
+  [[0], "☀️", "🌙"], [[1], "🌤️", "🌙"], [[2], "⛅", "☁️"], [[3], "☁️"], [[45, 48], "🌫️"],
+  [[51, 53, 55, 56, 57, 80, 81, 82], "🌦️"], [[61, 63, 65, 66, 67], "🌧️"], [[71, 73, 75, 77, 85, 86], "🌨️"],
+  [[95, 96, 99], "⛈️"],
+];
+// Card labels in the language of the conversation (the 7 with a local voice; others get English).
+const SKY_KEYS = [
+  [[0], "clear"], [[1], "mainlyClear"], [[2], "partlyCloudy"], [[3], "overcast"], [[45, 48], "fog"],
+  [[51, 53, 55, 56, 57], "drizzle"], [[61, 63, 66], "rain"], [[65, 67], "heavyRain"], [[71, 73, 77, 85], "snow"],
+  [[75, 86], "heavySnow"], [[80, 81], "showers"], [[82], "heavyShowers"], [[95], "thunderstorm"], [[96, 99], "hail"],
+];
+const CARD_TEXT = {
+  en: { feels: "feels", wind: "wind", here: "Your position", approx: "approx.", approxTitle: "Estimated from the internet connection",
+    news: "News", close: "Close", clear: "Clear", mainlyClear: "Mostly clear", partlyCloudy: "Partly cloudy",
+    overcast: "Overcast", fog: "Fog", drizzle: "Drizzle", rain: "Rain", heavyRain: "Heavy rain", snow: "Snow",
+    heavySnow: "Heavy snow", showers: "Showers", heavyShowers: "Heavy showers", thunderstorm: "Thunderstorm",
+    hail: "Thunderstorm with hail" },
+  it: { feels: "percepiti", wind: "vento", here: "La tua posizione", approx: "approssimata",
+    approxTitle: "Stimata dalla connessione internet", news: "Notizie", close: "Chiudi", clear: "Sereno",
+    mainlyClear: "Poco nuvoloso", partlyCloudy: "Parzialmente nuvoloso", overcast: "Coperto", fog: "Nebbia",
+    drizzle: "Pioviggine", rain: "Pioggia", heavyRain: "Pioggia forte", snow: "Neve", heavySnow: "Neve forte",
+    showers: "Rovesci", heavyShowers: "Rovesci forti", thunderstorm: "Temporale", hail: "Temporale con grandine" },
+  fr: { feels: "ressenti", wind: "vent", here: "Votre position", approx: "approx.",
+    approxTitle: "Estimée d'après la connexion internet", news: "Actualités", close: "Fermer", clear: "Ensoleillé",
+    mainlyClear: "Peu nuageux", partlyCloudy: "Partiellement nuageux", overcast: "Couvert", fog: "Brouillard",
+    drizzle: "Bruine", rain: "Pluie", heavyRain: "Forte pluie", snow: "Neige", heavySnow: "Forte neige",
+    showers: "Averses", heavyShowers: "Fortes averses", thunderstorm: "Orage", hail: "Orage avec grêle" },
+  de: { feels: "gefühlt", wind: "Wind", here: "Dein Standort", approx: "ungefähr",
+    approxTitle: "Geschätzt anhand der Internetverbindung", news: "Nachrichten", close: "Schließen", clear: "Klar",
+    mainlyClear: "Überwiegend klar", partlyCloudy: "Teilweise bewölkt", overcast: "Bedeckt", fog: "Nebel",
+    drizzle: "Nieselregen", rain: "Regen", heavyRain: "Starker Regen", snow: "Schnee", heavySnow: "Starker Schneefall",
+    showers: "Schauer", heavyShowers: "Starke Schauer", thunderstorm: "Gewitter", hail: "Gewitter mit Hagel" },
+  es: { feels: "sensación", wind: "viento", here: "Tu ubicación", approx: "aprox.",
+    approxTitle: "Estimada a partir de la conexión a internet", news: "Noticias", close: "Cerrar", clear: "Despejado",
+    mainlyClear: "Poco nuboso", partlyCloudy: "Parcialmente nublado", overcast: "Cubierto", fog: "Niebla",
+    drizzle: "Llovizna", rain: "Lluvia", heavyRain: "Lluvia fuerte", snow: "Nieve", heavySnow: "Nevada fuerte",
+    showers: "Chubascos", heavyShowers: "Chubascos fuertes", thunderstorm: "Tormenta", hail: "Tormenta con granizo" },
+  pt: { feels: "sensação", wind: "vento", here: "A sua localização", approx: "aprox.",
+    approxTitle: "Estimada a partir da ligação à internet", news: "Notícias", close: "Fechar", clear: "Céu limpo",
+    mainlyClear: "Pouco nublado", partlyCloudy: "Parcialmente nublado", overcast: "Encoberto", fog: "Nevoeiro",
+    drizzle: "Chuvisco", rain: "Chuva", heavyRain: "Chuva forte", snow: "Neve", heavySnow: "Neve forte",
+    showers: "Aguaceiros", heavyShowers: "Aguaceiros fortes", thunderstorm: "Trovoada", hail: "Trovoada com granizo" },
+  nl: { feels: "gevoel", wind: "wind", here: "Jouw locatie", approx: "ongeveer",
+    approxTitle: "Geschat op basis van de internetverbinding", news: "Nieuws", close: "Sluiten", clear: "Helder",
+    mainlyClear: "Overwegend helder", partlyCloudy: "Half bewolkt", overcast: "Bewolkt", fog: "Mist",
+    drizzle: "Motregen", rain: "Regen", heavyRain: "Zware regen", snow: "Sneeuw", heavySnow: "Zware sneeuwval",
+    showers: "Buien", heavyShowers: "Zware buien", thunderstorm: "Onweer", hail: "Onweer met hagel" },
+};
+const cardText = (lang) => CARD_TEXT[(lang || "").slice(0, 2)] || CARD_TEXT.en;
+const skyText = (code, t) => t[SKY_KEYS.find(([codes]) => codes.includes(code))?.[1]] || "";
+const wxIcon = (code, day = 1) => {
+  const row = WX_ICONS.find(([codes]) => codes.includes(code));
+  return row ? (!day && row[2]) || row[1] : "🌡️";
+};
+const deg = (x) => (x === null || x === undefined ? "–" : `${x}°`);
+const webLink = (u) => (typeof u === "string" && /^https?:\/\//.test(u) ? u : null);
+
+function weatherCard(c, lang) {
+  const tx = cardText(lang);
+  let weekday = (d) => d;
+  let today = "Today";
+  try {
+    const fmt = new Intl.DateTimeFormat(lang, { weekday: "short" });
+    weekday = (d) => fmt.format(new Date(`${d}T12:00`));
+    const t = new Intl.RelativeTimeFormat(lang, { numeric: "auto" }).format(0, "day");
+    today = t[0].toUpperCase() + t.slice(1);
+  } catch {
+    // unknown language tag: English labels
+  }
+  const lo = Math.min(...c.days.map((d) => d.min));
+  const span = Math.max(1, Math.max(...c.days.map((d) => d.max)) - lo);
+  const n = c.now;
+  const hours = c.hours.map((h) => `<div class="wx-hour"><span>${esc(h.time)}</span>`
+    + `<span class="wx-ico">${wxIcon(h.code, h.day)}</span><b>${deg(h.temp)}</b>`
+    + `<small>${h.rain ? `${h.rain}%` : "&nbsp;"}</small></div>`).join("");
+  const days = c.days.map((d, i) => `<div class="wx-day"><span class="wx-wd">${esc(i ? weekday(d.date) : today)}</span>`
+    + `<span class="wx-ico" title="${esc(skyText(d.code, tx))}">${wxIcon(d.code)}</span>`
+    + `<small class="wx-rain">${d.rain ? `${d.rain}%` : ""}</small><span class="wx-min">${deg(d.min)}</span>`
+    + `<span class="wx-bar"><i style="left:${((d.min - lo) / span) * 100}%;right:${((lo + span - d.max) / span) * 100}%"></i></span>`
+    + `<span>${deg(d.max)}</span></div>`).join("");
+  return `<div class="card-head"><span class="card-title">${esc(c.place || tx.here)}</span>`
+    + `${c.approximate ? `<span class="card-note" title="${esc(tx.approxTitle)}">${esc(tx.approx)}</span>` : ""}</div>`
+    + `<div class="wx-now"><span class="wx-big">${wxIcon(n.code, n.day)}</span><span class="wx-temp">${deg(n.temp)}</span>`
+    + `<span class="wx-meta">${esc(skyText(n.code, tx))}<br>${esc(tx.feels)} ${deg(n.feels)} · ${esc(tx.wind)} ${n.wind ?? "–"} km/h</span></div>`
+    + `<div class="wx-hours">${hours}</div><div class="wx-days">${days}</div>`;
+}
+
+function newsCard(c, lang) {
+  const items = c.items.map((i) => {
+    const link = webLink(i.link);
+    const img = webLink(i.image);
+    const body = `${img ? `<img src="${esc(img)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ""}`
+      + `<span><b>${esc(i.title)}</b>${i.summary ? `<small>${esc(i.summary)}</small>` : ""}</span>`;
+    return link
+      ? `<a class="news-item" href="${esc(link)}" target="_blank" rel="noopener noreferrer">${body}</a>`
+      : `<div class="news-item">${body}</div>`;
+  }).join("");
+  return `<div class="card-head"><span class="card-title">${esc(c.source || cardText(lang).news)}</span></div>`
+    + `<div class="news">${items}</div>`;
+}
+
+// Shown over the orb while it is relevant (until the next turn or ✕), and kept in the history.
+function showCard(card, turn) {
+  const lang = turnState(turn).lang || navigator.language;
+  const html = card.kind === "weather" ? weatherCard(card, lang) : card.kind === "news" ? newsCard(card, lang) : "";
+  if (!html) return;
+  const el = $("card");
+  el.innerHTML = `<button class="card-close icon-btn" aria-label="${esc(cardText(lang).close)}">`
+    + `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button>${html}`;
+  el.hidden = false;
+  el.scrollTop = 0;
+  document.body.classList.add("has-card");
+  addMsg("card-msg", html); // not "card": that class is the overlay (max-height, scroll)
+}
+
+function hideCard() {
+  $("card").hidden = true;
+  $("card").innerHTML = "";
+  document.body.classList.remove("has-card");
 }
 
 // ---------------------------------------------------------------- playback
@@ -372,6 +500,8 @@ function connect() {
         if (m.type === "ready") {
           opened = true;
           resolve((readyMsg = m));
+          if (m.location && position) sock.send(JSON.stringify({ type: "location", ...position }));
+          if (m.location) locate(false); // already allowed: refresh it, no prompt
           if (hadConnection) onReconnected(m);
           hadConnection = true;
         }
@@ -466,6 +596,7 @@ function onControl(m) {
     }
     case "turn_start": {
       $("confirm").hidden = true;
+      hideCard(); // the next answer brings its own, if any
       // A new reply starts: anything still playing from the previous turn is obsolete.
       const prev = turns.get(currentTurn);
       if (prev && botActive() && prev.text) {
@@ -542,6 +673,9 @@ function onControl(m) {
       setState("thinking", "Working on it…");
       break;
     }
+    case "card":
+      if (m.turn === currentTurn) showCard(m.card, m.turn);
+      break;
     case "confirm":
       $("confirm").hidden = false;
       $("status").textContent = m.action;
@@ -550,6 +684,7 @@ function onControl(m) {
       notice(m.fallback ? `${m.stage}: ${m.msg} → using ${m.fallback}` : `Error ${m.stage}: ${m.msg}`, true);
       break;
     case "reset_done":
+      hideCard();
       $("log").innerHTML = "";
       $("cap-user").textContent = $("cap-bot").textContent = "";
       notice("New conversation");
@@ -688,6 +823,7 @@ async function start() {
   refreshState();
   // No greeting in the middle of a conversation already started in the chat.
   ws.send(JSON.stringify({ type: "hello", greet: !$("log").querySelector(".msg") }));
+  locate(true);
 }
 
 // Voice only: the WebSocket stays open, so the conversation goes on in the chat.
@@ -739,9 +875,9 @@ $("start").addEventListener("click", start);
 $("confirm-yes").addEventListener("click", () => answerConfirm(true));
 $("confirm-no").addEventListener("click", () => answerConfirm(false));
 $("mute").addEventListener("click", () => setMuted(!muted));
-$("history-btn").addEventListener("click", () => toggleDrawer());
 $("drawer-close").addEventListener("click", () => toggleDrawer(false));
 $("scrim").addEventListener("click", () => toggleDrawer(false));
+$("card").addEventListener("click", (e) => e.target.closest(".card-close") && hideCard());
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") toggleDrawer(false);
   if (e.code === "Space" && e.target === document.body && running) {
@@ -762,6 +898,33 @@ function silenceBot() {
   refreshState();
 }
 
+// ---------------------------------------------------------------- location
+
+// Where the user is, for the weather. ask = true may show the browser's permission prompt (so only after
+// a click); false only reads a position already allowed. Denied or unavailable: the server falls back to
+// WEATHER_LOCATION or the public IP. Resolves when done, never rejects.
+async function locate(ask) {
+  if (!("geolocation" in navigator) || !readyMsg?.location) return;
+  if (!ask) {
+    try {
+      if ((await navigator.permissions.query({ name: "geolocation" })).state !== "granted") return;
+    } catch {
+      return; // no Permissions API: wait for a click
+    }
+  }
+  await new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        position = { lat: p.coords.latitude, lon: p.coords.longitude };
+        if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "location", ...position }));
+        resolve();
+      },
+      resolve,
+      { enableHighAccuracy: false, maximumAge: 10 * 60 * 1000, timeout: 15000 },
+    );
+  });
+}
+
 // ---------------------------------------------------------------- chat
 
 async function sendText(text) {
@@ -773,6 +936,9 @@ async function sendText(text) {
     notice(`Could not connect: ${err.message || err}`, true);
     return false;
   }
+  // First message: the position, if quick (allowed already), goes before the question.
+  if (!position) await Promise.race([locate(true), new Promise((r) => setTimeout(r, 1500))]);
+  if (ws?.readyState !== WebSocket.OPEN) return false;
   // What the user got of the current reply: heard (voice on) or read (text only).
   const t = turns.get(currentTurn);
   const seen = running ? (heard.turn === currentTurn ? heard.seq : -1) : (t ? t.sentences.length - 1 : -1);
@@ -804,9 +970,11 @@ $("chat-input").addEventListener("keydown", (e) => {
     $("chat").requestSubmit();
   }
 });
+// One button for the panel: conversation history, chat and settings.
 $("chat-btn").addEventListener("click", () => {
-  toggleDrawer(true);
-  $("chat-input").focus();
+  const open = !$("drawer").classList.contains("open");
+  toggleDrawer(open);
+  if (open) $("chat-input").focus();
 });
 
 $("viz").addEventListener("click", () => {

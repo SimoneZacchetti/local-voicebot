@@ -21,16 +21,14 @@
     <header class="topbar">
       <div class="brand"><span class="dot"></span>Voicebot</div>
       <div class="topbar-actions">
-        <button id="chat-btn" class="icon-btn" aria-label="Write a message" title="Write">
+        <button id="chat-btn" class="icon-btn" aria-label="Conversation and chat" title="Conversation">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" /></svg>
-        </button>
-        <button id="history-btn" class="icon-btn" aria-label="Cronologia" title="Cronologia">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" /></svg>
         </button>
       </div>
     </header>
 
     <main class="stage">
+      <section id="card" class="card" hidden aria-live="polite"></section>
       <canvas id="viz" aria-label="Voice visualization"></canvas>
       <div class="captions" aria-live="polite">
         <p id="cap-user" class="cap-user"></p>

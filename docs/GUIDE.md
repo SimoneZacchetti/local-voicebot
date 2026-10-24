@@ -65,7 +65,7 @@ Clone the repo into a short path outside OneDrive (e.g. `C:\src\local-voicebot`)
 ./start.sh                 # Windows: .\start.cmd. Or, on both: uv run python -m server
 ```
 
-Open <http://localhost:8000> in Chrome (or Edge on Windows), press "Start talking" and speak. The sphere in the middle follows the voice in real time: yours when you speak, the bot's when it answers. Its color changes with the state (blue: listening/speaking, purple: thinking, gray: microphone off). Subtitles scroll below the sphere; the full history is in the panel at the top right. Space bar or the microphone button: mute/unmute the microphone. The first run downloads the models (~4 GB); after that, the server is ready in ~6 s.
+Open <http://localhost:8000> in Chrome (or Edge on Windows), press "Start talking" and speak. The sphere in the middle follows the voice in real time: yours when you speak, the bot's when it answers. Its color changes with the state (blue: listening/speaking, purple: thinking, gray: microphone off). Subtitles scroll below the sphere; the full history is in the panel that the speech bubble icon at the top right opens. Space bar or the microphone button: mute/unmute the microphone. The first run downloads the models (~4 GB); after that, the server is ready in ~6 s.
 
 - **Interrupting**: talk over the bot. The audio pauses immediately; if it really is speech (not echo or noise) the answer is discarded and the bot listens. Only the part you actually heard stays in the history.
 - **Silencing it**: tap the circle while it speaks. It stops generating and remembers only the part you heard.
@@ -74,6 +74,20 @@ Open <http://localhost:8000> in Chrome (or Edge on Windows), press "Start talkin
 - **Languages**: the language is detected from the transcribed text. Short phrases ("yes", "ok") keep the current language. Local voices for Italian, English, French, German, Spanish, Portuguese and Dutch; the other European languages recognized by Parakeet use the browser's voice.
 - **Text chat**: the speech bubble icon at the top opens the panel with a text field (Enter to send, Shift+Enter for a new line). It is the same conversation as voice: with voice active the bot also answers out loud, otherwise only in writing. You can type without ever pressing "Start talking", and switch to voice at any time without losing context. "End" turns off the microphone and audio but keeps the conversation; "New conversation" resets it. A message typed while the bot is answering interrupts it just like voice, but is never merged with the previous message.
 - **Speakers**: everything is more robust with headphones. Without headphones Chrome cancels the echo; if the bot interrupts itself, turn on "Speaker mode" at the bottom.
+
+## Weather and news
+
+Ask "che tempo fa qui?", "piove domani?", "che tempo farà sabato a Roma?", "what's the weather in London?" or "dammi le ultime notizie". It works with or without Home Assistant, by voice, in the chat and from Siri. It is on by default and is the only default feature that goes out to the internet: set `INFO_TOOLS=` (empty) in `.env` to keep the bot fully offline, or `INFO_TOOLS=weather` for the weather only.
+
+- **Weather**: [Open-Meteo](https://open-meteo.com) (free, no key). The bot gets the current weather, the next 24 hours and 7 days, and answers only what you asked.
+- **Where you are**: when you say no place ("qui", "fuori"), the bot uses, in order:
+  1. The position of the browser. After "Start talking" or your first chat message, Chrome asks once for permission. On the iPhone app it is the phone's position, so it follows you away from home.
+  2. `WEATHER_LOCATION` from `.env`: a city (`Milano`) or `lat,lon`.
+  3. The location of your public IP. This is approximate, and wrong behind a VPN or a corporate network; the bot then names the city, so you notice.
+- **Privacy**: the position is rounded to 0.1° (about 10 km) before it leaves the computer. It goes to Open-Meteo, and to OpenStreetMap [Nominatim](https://nominatim.org) to get the town name. Without a browser position, the IP lookup goes to [ipwho.is](https://ipwho.is) (fallback [ipapi.co](https://ipapi.co)).
+- **News**: the RSS feed of the language you are speaking: ANSA (it), BBC (en), France 24 (fr), tagesschau (de), El País (es), RTP (pt), NOS (nl). Other languages get the English one. Replace one with `NEWS_FEED_<LANG>`, e.g. `NEWS_FEED_IT=https://www.ansa.it/sito/notizie/sport/sport_rss.xml`. News about a topic or a place ("notizie di Madrid", "notizie di sport") come from a [Google News](https://news.google.com) search in the language you are speaking, so any city or subject has results; the topic is the only thing sent to Google. If the search finds nothing or fails, the feed of the language is filtered by the topic instead. `NEWS_SEARCH=0` turns the search off.
+- **On screen**: while the bot speaks, a card appears above the orb. For the weather it shows the current weather, the next 24 hours and 7 days with icons. For the news it shows the headlines with their pictures, when the feed has them; tap a headline to open the article in a new tab. Cards use the language you are speaking (the 7 with a local voice; English for the others). The card goes away with ✕ or at the next question, and a copy stays in the conversation panel. Only the screen gets the links and pictures, never the LLM. Pictures load from the news site's servers. `/api/command` returns the same data in `cards`, e.g. for a widget.
+- **Results are cached**: 10 minutes for the weather, 15 for the news. A follow-up question costs nothing.
 
 ## Home control (Google Home devices)
 
@@ -175,6 +189,8 @@ All keys are in [.env.example](../.env.example). The most useful ones:
 | `CONTINUATION_S` | `1.2` | window for merging an utterance resumed right after the answer starts |
 | `DEFAULT_LANG` | `it` | initial language |
 | `VOICE_IT` … `VOICE_NL` | `giovanni`, `alba`, … | default Pocket TTS voices |
+| `INFO_TOOLS` | `weather,news` | weather and news tools (internet). Empty = fully offline. See [Weather and news](#weather-and-news) |
+| `WEATHER_LOCATION` | empty | place for the weather when you name none and the browser gives no position: a city or `lat,lon`. Empty = the public IP's location |
 | `STATS_ENABLED` | `true` | records each turn's timings for the `/stats` page (never what was said or typed) |
 | `STT_PROVIDER` | `parakeet` | `whisper-mlx` (Mac only, requires `uv sync --extra whisper`) for non-European languages |
 | `STT_BACKEND` | `auto` | engine for local Parakeet: `mlx` (Apple Silicon only) or `onnx` (ONNX Runtime on the CPU, any platform). `auto` = `mlx` on Apple Silicon, `onnx` elsewhere |
@@ -228,6 +244,7 @@ GitHub Actions ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs `r
 | [server/langid.py](../server/langid.py) | language detection with hysteresis |
 | [server/chunker.py](../server/chunker.py) | splits the LLM stream into speakable sentences (first chunk sent early) |
 | [server/tools.py](../server/tools.py), [server/ha.py](../server/ha.py) | home tools (Home Assistant MCP), confirmations for risky actions |
+| [server/info.py](../server/info.py) | weather (Open-Meteo) and news (RSS) tools, the user's position |
 | [server/stats.py](../server/stats.py), [web/stats.html](../web/stats.html) | per-turn timing log (SQLite) and `/stats` page |
 | [server/textclean.py](../server/textclean.py) | markdown/emoji cleanup, hallucination and echo filters |
 | [web/app.js](../web/app.js), [web/player-worklet.js](../web/player-worklet.js) | microphone, VAD, gapless playback, interruptions, text chat |

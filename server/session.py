@@ -6,7 +6,9 @@ Wire protocol (see README for the full table):
 - server -> client binary: 8-byte header ``<II`` = turn, seq, then Int16 LE PCM, 24 kHz mono.
 - everything else is JSON text messages. Typed chat: ``{"type": "text", "text", "heard_turn",
   "heard_seq", "playing"}``; replies are spoken only while voice is on (``hello`` or mic audio turn
-  it on, ``{"type": "voice", "on": false}`` turns it off).
+  it on, ``{"type": "voice", "on": false}`` turns it off). ``{"type": "location", "lat", "lon"}``: where
+  the user is (browser geolocation), for the weather tool. Server -> client ``{"type": "card", "turn", "card"}``:
+  weather or news to show on screen (``card.kind``), from a tool result the LLM gets without it.
 """
 
 from __future__ import annotations
@@ -24,9 +26,10 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from .chunker import Chunker
 from .config import cfg
+from .info import valid_coords
 from .langid import BCP47, LangId
 from .llm import LlmRouter
-from .prompts import CANCELLED, DONE, FAILED, GREETINGS, PARTIAL, build_messages, set_home_context
+from .prompts import CANCELLED, DONE, FAILED, GREETINGS, PARTIAL, build_messages, set_tool_context
 from .stats import Stats
 from .stt import SAMPLE_RATE, SttRouter
 from .textclean import clean_for_tts, is_echo, is_hallucination
@@ -88,6 +91,7 @@ class Turn:
     task: asyncio.Task | None = None
     first_audio_at: float | None = None  # perf_counter when the first audio left the server
     actions: list[str] = field(default_factory=list)  # tool actions executed in this turn
+    cards: list[dict] = field(default_factory=list)  # weather/news shown on screen (never sent to the LLM)
     hist_start: int = 0  # index of this turn's user message in history
     tools_started: bool = False  # a tool was sent to the house (maybe still running)
     superseded: bool = False  # a newer turn replaced this one: it must not act any more
@@ -119,6 +123,7 @@ class Session:
         self.epoch = 0  # bumped on reset: utterances transcribed across a reset are dropped
         self.voice = False  # the client has a voice session running (mic + player)
         self.confirm_ttl_s: float | None = None  # time to answer "are you sure?" (None: CONFIRM_TTL_S)
+        self.position: tuple[float, float] | None = None  # where the user is (browser/phone), for the weather
         cid = str(ws.query_params.get("client", "")) if ws is not None else ""
         self.client_id = cid if 16 <= len(cid) <= 64 and cid.replace("-", "").isalnum() else ""
 
@@ -181,8 +186,9 @@ class Session:
             "lang": self.lang,
             "vad": {"redemption_ms": cfg.vad_redemption_ms},
             "resumed": resumed,
+            "location": self.svc.tools.wants_position,  # the browser may send where the user is
             "providers": {"stt": self.svc.stt.name, "llm": self.svc.llm.name,
-                          "home_tools": len(self.svc.tools.specs),
+                          "home_tools": len(self.svc.tools.home_specs),
                           "llm_model": cfg.groq_llm_model if self.svc.llm.name == "groq" else cfg.llm_model,
                           "tts": "pocket"},
         })
@@ -228,6 +234,8 @@ class Session:
                 self._spawn(self.greet())
         elif kind == "voice":
             self.voice = bool(m.get("on"))
+        elif kind == "location":
+            self.set_position(m.get("lat"), m.get("lon"))
         elif kind == "text":
             self._spawn(self.handle_text(m))
         elif kind == "speech_start":
@@ -253,6 +261,11 @@ class Session:
             self.history.clear()
             self.lang = cfg.default_lang
             self.send({"type": "reset_done"})
+
+    def set_position(self, lat, lon) -> None:
+        """Where the user is, sent by the browser (geolocation) or the phone API; garbage is ignored."""
+        if valid_coords(lat, lon):
+            self.position = (float(lat), float(lon))
 
     # -- turns --------------------------------------------------------------------------
 
@@ -443,9 +456,11 @@ class Session:
         tools = self.svc.tools
         if await tools.update_route():  # this computer left or reached the home network
             llm.set_tools(tools.specs)
-            set_home_context(tools.context)
+            set_tool_context(tools)
+        hint = tools.hint(turn.user_text)
         messages = build_messages(
-            self.history, turn.lang, cfg.groq_history_turns if llm.using_remote else None, with_tools=tools.enabled
+            self.history, turn.lang, cfg.groq_history_turns if llm.using_remote else None, with_tools=tools.enabled,
+            hint=hint,
         )
         sentences: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -455,29 +470,54 @@ class Session:
             chunker = Chunker()
             msgs = messages
             failed = unfinished = False
+
+            def say(delta: str) -> None:
+                self.send({"type": "token", "turn": turn.id, "text": delta})
+                for s in chunker.feed(delta):
+                    sentences.put_nowait(s)
+
+            async def ask(msgs: list[dict], rnd: int, hold: bool) -> tuple[list[ToolCall], list[str]]:
+                """One LLM reply. ``hold``: keep the text back instead of saying it as it streams."""
+                calls: list[ToolCall] = []
+                text: list[str] = []
+                t_round = time.perf_counter()
+                ttft_key = "llm_ttft_ms" if rnd == 0 else "llm_after_tools_ttft_ms"
+                for attempt in range(cfg.llm_empty_retries + 1):
+                    async for delta in llm.stream(msgs):
+                        if isinstance(delta, ToolCall):
+                            turn.metrics.setdefault("llm_tool_call_ms", round((time.perf_counter() - t_round) * 1000))
+                            calls.append(delta)
+                            continue
+                        turn.metrics.setdefault(ttft_key, round((time.perf_counter() - t_round) * 1000))
+                        text.append(delta)
+                        if not hold:
+                            say(delta)
+                    if calls or "".join(text).strip():
+                        break
+                    # Ollama's Gemma 4 parser sometimes drops a tool call and returns nothing
+                    # at all. Nothing was said yet, so retrying is invisible to the user.
+                    log.warning("turn %d: empty LLM reply (round %d), retry %d", turn.id, rnd, attempt + 1)
+                    turn.metrics["llm_empty_retries"] = turn.metrics.get("llm_empty_retries", 0) + 1
+                return calls, text
+
             try:
                 for rnd in range(cfg.tool_max_rounds + 1):
-                    calls: list[ToolCall] = []
-                    text: list[str] = []
-                    t_round = time.perf_counter()
-                    ttft_key = "llm_ttft_ms" if rnd == 0 else "llm_after_tools_ttft_ms"
-                    for attempt in range(cfg.llm_empty_retries + 1):
-                        async for delta in llm.stream(msgs):
-                            if isinstance(delta, ToolCall):
-                                turn.metrics.setdefault("llm_tool_call_ms", round((time.perf_counter() - t_round) * 1000))
-                                calls.append(delta)
-                                continue
-                            turn.metrics.setdefault(ttft_key, round((time.perf_counter() - t_round) * 1000))
-                            self.send({"type": "token", "turn": turn.id, "text": delta})
-                            text.append(delta)
-                            for s in chunker.feed(delta):
-                                sentences.put_nowait(s)
-                        if calls or "".join(text).strip():
-                            break
-                        # Ollama's Gemma 4 parser sometimes drops a tool call and returns nothing
-                        # at all. Nothing was said yet, so retrying is invisible to the user.
-                        log.warning("turn %d: empty LLM reply (round %d), retry %d", turn.id, rnd, attempt + 1)
-                        turn.metrics["llm_empty_retries"] = turn.metrics.get("llm_empty_retries", 0) + 1
+                    # A weather or news question answered without the tool is made up (Qwen does it after
+                    # a few tool turns, despite the hint): hold the text until the tool call shows up.
+                    hold = hint is not None and rnd == 0
+                    calls, text = await ask(msgs, rnd, hold)
+                    if hold and not calls:
+                        log.warning("turn %d: answered without %s, asking again: %r", turn.id, hint, "".join(text))
+                        turn.metrics["llm_hint_retries"] = 1
+                        again = [*msgs[:-1], {**msgs[-1], "content": msgs[-1]["content"]
+                                              + f"\n\n(Do not answer from memory: call {hint} now.)"}]
+                        calls, text = await ask(again, rnd, hold)
+                        if not calls:
+                            failed = True
+                            text = [FAILED.get(turn.lang, FAILED["en"])]
+                    if hold:
+                        for delta in text:
+                            say(delta)
                     if llm.last_fallback:
                         fallbacks.append(llm.last_fallback)
                     if not calls:
@@ -597,10 +637,13 @@ class Session:
     async def _exec(self, turn: Turn, call: ToolCall) -> dict:
         t = time.perf_counter()
         try:
-            res = await asyncio.wait_for(self.svc.tools.execute(call), cfg.tool_timeout_s)
+            res = await asyncio.wait_for(self.svc.tools.execute(call, turn.lang, self.position), cfg.tool_timeout_s)
         except Exception as e:  # noqa: BLE001 - timeout or transport error
             res = {"ok": False, "error": type(e).__name__}
-        if res.get("ok"):
+        if (card := res.pop("card", None)) is not None and self.current is turn:
+            turn.cards.append(card)
+            self.send({"type": "card", "turn": turn.id, "card": card})
+        if res.get("ok") and self.svc.tools.is_action(call.name):
             turn.actions.append(self.svc.tools.summary(call))
         log.info("tool turn=%d %s %s -> %s (%.0f ms)", turn.id, call.name, call.args,
                  str(res)[:200], (time.perf_counter() - t) * 1000)

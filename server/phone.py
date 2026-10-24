@@ -64,8 +64,10 @@ class PhoneSessions:
     def _busy(entry: PhoneSession) -> bool:
         return entry.turn is not None and not entry.turn.done
 
-    async def command(self, text: str, sid: str | None = None) -> dict:
+    async def command(self, text: str, sid: str | None = None, lat: float | None = None,
+                      lon: float | None = None) -> dict:
         sid, entry = self._get(sid)
+        entry.session.set_position(lat, lon)  # kept for the next commands of this session
         if self._busy(entry):
             return {"status": "running", "reply": "Still working on the previous request.", "session_id": sid}
         async with entry.lock:
@@ -111,6 +113,7 @@ class PhoneSessions:
             "reply": " ".join(turn.sentences),
             "session_id": sid,
             "actions": turn.actions,
+            "cards": turn.cards,  # weather/news data, e.g. for a widget
             "route": self.svc.tools.mode,
         }
         p = s.pending

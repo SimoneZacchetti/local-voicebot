@@ -2,6 +2,7 @@
 
 Tools come from Home Assistant's MCP server (lights, climate, media, lists, live state,
 exposed scripts...) plus two extras: Google Assistant text commands and announcements.
+Weather and news (server/info.py) are always there, with or without Home Assistant.
 Risky actions (locks, doors, gates, alarms) are never executed on the LLM's word alone:
 the user must answer "sì" to a spoken question, checked deterministically in code.
 """
@@ -18,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .config import cfg
+from .info import Info, route
 
 log = logging.getLogger("voicebot.tools")
 
@@ -239,8 +241,9 @@ def yes_no(text: str) -> bool | None:
 
 
 class ToolRegistry:
-    def __init__(self, ha=None) -> None:
+    def __init__(self, ha=None, info: Info | None = None) -> None:
         self.ha = ha
+        self.info = info  # weather and news: they inform, they never act on the house
         self.specs: list[dict] = []
         self._mcp_names: set[str] = set()
         self.announce_players: list[str] = []
@@ -255,11 +258,40 @@ class ToolRegistry:
     def enabled(self) -> bool:
         return bool(self.specs)
 
+    @property
+    def info_specs(self) -> list[dict]:
+        return self.info.specs if self.info is not None else []
+
+    @property
+    def home_specs(self) -> list[dict]:
+        return [s for s in self.specs if self.is_action(s["function"]["name"])]
+
+    @property
+    def home_enabled(self) -> bool:
+        return bool(self.home_specs)
+
+    @property
+    def wants_position(self) -> bool:
+        return self.info is not None and "get_weather" in self.info.names
+
+    def hint(self, text: str | None) -> str | None:
+        """Weather or news tool this question needs (when available), to name it to the LLM."""
+        if self.info is None:
+            return None
+        name = route(text)
+        return name if name in self.info.names else None
+
+    def is_action(self, name: str) -> bool:
+        """Changes something in the house (counted as an action), unlike a weather or news lookup."""
+        return self.info is None or name not in self.info.names
+
     async def start(self) -> bool:
         """Discover tools. Never raises: without Home Assistant the bot just has no tools.
 
         Returns False when Home Assistant is configured but unreachable, so the caller can retry
         (e.g. the Tailscale VPN comes up after the server)."""
+        self.specs = list(self.info_specs)  # until Home Assistant answers
+        self._home = (self.specs, "")
         if self.ha is None:
             return True
         try:
@@ -274,6 +306,7 @@ class ToolRegistry:
             log.error("Home Assistant not reachable at %s: %s (home control disabled until it is)", self.ha.url, e)
             self.context, self.entities = "", {}
             return False
+        home: list[dict] = []
         allow = set(cfg.ha_tool_allowlist)
         states = await self.ha.states()
         has_satellites = any(st["entity_id"].startswith("assist_satellite.") for st in states)
@@ -283,19 +316,20 @@ class ToolRegistry:
             if allow and t["name"] not in allow and t["name"].split("__")[-1] not in allow:
                 continue
             self._mcp_names.add(t["name"])
-            self.specs.append({"type": "function", "function": {
+            home.append({"type": "function", "function": {
                 "name": t["name"], "description": t.get("description", "")[:400],
                 "parameters": t.get("inputSchema") or {"type": "object", "properties": {}},
             }})
         if cfg.google_fallback and "google_assistant_sdk.send_text_command" in self.ha.services:
-            self.specs.append(GOOGLE_TOOL)
+            home.append(GOOGLE_TOOL)
         if cfg.ha_announce_players and "tts.speak" in self.ha.services:
             ttss = await self.ha.entities("tts")
             if ttss:
                 self.tts_entity = cfg.ha_tts_entity or ttss[0]["entity_id"]
                 self.announce_players = cfg.ha_announce_players
         if self.tts_entity or "notify.google_assistant_sdk" in self.ha.services:
-            self.specs.append(ANNOUNCE_TOOL)
+            home.append(ANNOUNCE_TOOL)
+        self.specs = home + self.info_specs
         log.info("home tools: %s", ", ".join(s["function"]["name"] for s in self.specs))
         self._home = (self.specs, self.context)
         self.mode = "home"
@@ -324,21 +358,25 @@ class ToolRegistry:
             self._probe_at = time.monotonic() + cfg.home_probe_ttl_s
             away = not await probe(cfg.home_probe)
         mode = "away" if away else "home"
-        if mode == self.mode and self.specs:
+        if mode == self.mode and self.home_enabled:
             return False
         self.mode = mode
         specs, context = self._home
         if away:
-            self.specs = [GOOGLE_AWAY_TOOL] + ([ANNOUNCE_TOOL] if "notify.google_assistant_sdk" in self.ha.services else [])
+            self.specs = [GOOGLE_AWAY_TOOL] + ([ANNOUNCE_TOOL] if "notify.google_assistant_sdk" in self.ha.services else []) \
+                + self.info_specs
             self.context = context + AWAY_NOTE
         else:
             self.specs, self.context = specs, context
         log.info("home route: %s (%s)", mode, ", ".join(s["function"]["name"] for s in self.specs))
         return True
 
-    async def execute(self, call: ToolCall) -> dict:
+    async def execute(self, call: ToolCall, lang: str = "en", position: tuple[float, float] | None = None) -> dict:
+        """Run one call. ``lang`` and ``position`` (where the user is) serve the weather and news tools."""
         try:
-            if call.name in self._mcp_names:
+            if self.info is not None and call.name in self.info.names:
+                res = await self.info.execute(call.name, call.args, lang, position)
+            elif call.name in self._mcp_names:
                 res = await self.ha.call_tool(call.name, call.args)
             elif call.name == "google_assistant" and self._has("google_assistant"):
                 res = await self.ha.call_service("google_assistant_sdk", "send_text_command",
@@ -365,7 +403,7 @@ class ToolRegistry:
         return any(s["function"]["name"] == name for s in self.specs)
 
     def risk(self, call: ToolCall) -> str | None:
-        if not cfg.confirm_risky:
+        if not cfg.confirm_risky or not self.is_action(call.name):
             return None
         q = risk_of(call, self.lookup)
         if q is None and call.name == "google_assistant":
